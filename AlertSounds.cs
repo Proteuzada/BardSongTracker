@@ -21,6 +21,11 @@ namespace BardSongTracker
             new("voice-ah", "Voice: Ah", "BardSongTracker.Resources.voice-ah.wav", "voice-ah.wav"),
             new("voice-nya", "Voice: Nya", "BardSongTracker.Resources.voice-nya.wav", "voice-nya.wav"),
             new("voice-giggle", "Voice: Giggle", "BardSongTracker.Resources.voice-giggle.wav", "voice-giggle.wav"),
+            new("voice-laugh", "Voice: Laugh", "BardSongTracker.Resources.voice-laugh.wav", "voice-laugh.wav"),
+            new("voice-oh", "Voice: Oh", "BardSongTracker.Resources.voice-oh.wav", "voice-oh.wav"),
+            new("voice-sigh", "Voice: Sigh", "BardSongTracker.Resources.voice-sigh.wav", "voice-sigh.wav"),
+            new("voice-sneeze", "Voice: Sneeze", "BardSongTracker.Resources.voice-sneeze.wav", "voice-sneeze.wav"),
+            new("voice-loveyou", "Voice: Love You", "BardSongTracker.Resources.voice-loveyou.wav", "voice-loveyou.wav"),
         };
 
         public static string[] Names { get; } = BuildNames();
