@@ -110,7 +110,7 @@ namespace BardSongTracker.Windows
             const float gap = 12f;
             var column = Math.Max(220f, (avail.X - gap) / 2f);
 
-            BeginPanel("bst-card-overlay", new Vector2(column, 390f));
+            BeginPanel("bst-card-overlay", new Vector2(column, 430f));
             PanelTitle("Overlay");
             ImGui.TextWrapped("Show the Bard song and the current job's damage-over-time effects.");
             ImGui.Spacing();
@@ -126,7 +126,7 @@ namespace BardSongTracker.Windows
 
             ImGui.SameLine(0f, gap);
 
-            BeginPanel("bst-card-sound", new Vector2(column, 390f));
+            BeginPanel("bst-card-sound", new Vector2(column, 430f));
             PanelTitle("Sound");
             ImGui.TextWrapped("Play a sound when a song or a DoT reaches its alert threshold.");
             ImGui.Spacing();
@@ -149,7 +149,7 @@ namespace BardSongTracker.Windows
                 soundAlert.SetSound(configuration.AlertSoundId);
                 configuration.Save();
             }
-            ImGui.TextDisabled("Short original alerts. Classic keeps the previous sound.");
+            ImGui.TextDisabled("Chimes are original. Voices are by DarkNightPrincess, CC0, not from a show.");
             ImGui.Spacing();
             if (ImGui.Button("Test sound", new Vector2(ImGui.GetContentRegionAvail().X, 0f)))
                 soundAlert.PlayAlert(0f, ignoreCooldown: true);

@@ -14,7 +14,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 - Target: `net10.0-windows`
 - Dalamud API 15, DalamudPackager 15.0.0
-- Audio: NAudio 2.2.1 (WASAPI). The General tab picks one of the short embedded alerts. Classic is the original sound; the others are original chimes.
+- Audio: NAudio 2.2.1 (WASAPI). The General tab picks the alert. Classic is the original sound. Chime, Sparkle, Pop, Bell, Twinkle, and Slide are original. The voice alerts (Woah, Wow, Okay, Ah, Nya, Giggle) are original recordings by DarkNightPrincess, dedicated to the public domain under CC0 on Freesound. They are not clips from an anime.
 
 ## Install from Dalamud, without compiling
 
@@ -49,3 +49,14 @@ Copy these files from `bin\Release\` to `%AppData%\XIVLauncher\devPlugins\BardSo
 Enable dev plugins in Dalamud and load the plugin from `/xlplugins`.
 
 Do not use an old `ReadyToInstall` folder. That earlier build had a smaller DLL, with no MP3 and no NAudio, and this version cannot play the alert without those DLLs beside it.
+
+## Voice alerts
+
+Woah, Wow, Okay, Ah, Nya, and Giggle are voice recordings by DarkNightPrincess, published on Freesound under CC0 1.0. The license lets the plugin include them. They are not lines taken from an anime.
+
+- [Woah](https://freesound.org/people/DarkNightPrincess/sounds/658568/)
+- [Wow](https://freesound.org/people/DarkNightPrincess/sounds/658569/)
+- [Okay](https://freesound.org/people/DarkNightPrincess/sounds/648637/)
+- [Ah](https://freesound.org/people/DarkNightPrincess/sounds/646618/)
+- [Nya](https://freesound.org/people/DarkNightPrincess/sounds/625317/)
+- [Giggle](https://freesound.org/people/DarkNightPrincess/sounds/611780/)
