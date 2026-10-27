@@ -1,5 +1,6 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.ClientState.JobGauge.Enums;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -8,6 +9,8 @@ namespace BardSongTracker.Windows
 {
     public class ConfigWindow : Window, IDisposable
     {
+        private const float SongDuration = 45f;
+
         private readonly Configuration configuration;
         private readonly SongTracker songTracker;
         private readonly DotTracker dotTracker;
@@ -24,13 +27,13 @@ namespace BardSongTracker.Windows
             SongTracker songTracker,
             DotTracker dotTracker,
             SoundAlert soundAlert,
-            Func<uint?> currentJobId) : base("BardSongTracker")
+            Func<uint?> currentJobId) : base("Bard Song Tracker")
         {
-            this.Size = new Vector2(780, 640);
+            this.Size = new Vector2(920, 700);
             this.SizeCondition = ImGuiCond.FirstUseEver;
             this.SizeConstraints = new WindowSizeConstraints
             {
-                MinimumSize = new Vector2(640, 480),
+                MinimumSize = new Vector2(760, 560),
                 MaximumSize = new Vector2(1400, 1200),
             };
 
@@ -45,23 +48,29 @@ namespace BardSongTracker.Windows
 
         public override void Draw()
         {
+            DrawHeader();
+            ImGui.Spacing();
+
             if (!ImGui.BeginTabBar("bst-tabs"))
                 return;
 
             if (ImGui.BeginTabItem("General"))
             {
+                ImGui.Spacing();
                 DrawGeneral();
                 ImGui.EndTabItem();
             }
 
             if (ImGui.BeginTabItem("Bard"))
             {
+                ImGui.Spacing();
                 DrawBard();
                 ImGui.EndTabItem();
             }
 
             if (ImGui.BeginTabItem("DoTs"))
             {
+                ImGui.Spacing();
                 DrawDots();
                 ImGui.EndTabItem();
             }
@@ -69,82 +78,129 @@ namespace BardSongTracker.Windows
             ImGui.EndTabBar();
         }
 
+        private void DrawHeader()
+        {
+            ImGui.TextColored(new Vector4(0.78f, 0.88f, 1f, 1f), "Bard Song Tracker");
+            var status = HeaderStatus();
+            var width = ImGui.CalcTextSize(status).X;
+            var right = ImGui.GetWindowContentRegionMax().X;
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), right - width));
+            ImGui.TextDisabled(status);
+        }
+
+        private string HeaderStatus()
+        {
+            var parts = new List<string>();
+            if (songTracker.CurrentSong != Song.None)
+                parts.Add($"{songTracker.ShortName}  {songTracker.RemainingTime:0.0}s");
+
+            var dots = dotTracker.Active.Count;
+            if (dots == 1)
+                parts.Add("1 DoT");
+            else if (dots > 1)
+                parts.Add($"{dots} DoTs");
+
+            return parts.Count == 0 ? "Nothing active" : string.Join("   ·   ", parts);
+        }
+
         private void DrawGeneral()
         {
-            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Overlay and sound");
-            ImGui.Separator();
-            ImGui.TextWrapped("The overlay shows the Bard song and the current job's damage-over-time effects. A sound plays when one of them reaches the alert threshold.");
+            var avail = ImGui.GetContentRegionAvail();
+            const float gap = 12f;
+            var column = Math.Max(220f, (avail.X - gap) / 2f);
 
+            BeginPanel("bst-card-overlay", new Vector2(column, 310f));
+            PanelTitle("Overlay");
+            ImGui.TextWrapped("Show the Bard song and the current job's damage-over-time effects.");
+            ImGui.Spacing();
             Checkbox("Show overlay", configuration.ShowOverlay, value => configuration.ShowOverlay = value);
-            Checkbox("Play sound", configuration.PlaySound, value => configuration.PlaySound = value);
-
+            ImGui.Spacing();
             var scale = configuration.OverlayScale;
-            ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Overlay scale", ref scale, 0.6f, 3.0f, "%.1f"))
+            LabeledSlider("Overlay scale", "##overlay-scale", ref scale, 0.6f, 3.0f, "%.1f", value =>
             {
-                configuration.OverlayScale = scale;
+                configuration.OverlayScale = value;
                 configuration.Save();
-            }
+            });
+            EndPanel();
 
+            ImGui.SameLine(0f, gap);
+
+            BeginPanel("bst-card-sound", new Vector2(column, 310f));
+            PanelTitle("Sound");
+            ImGui.TextWrapped("Play a sound when a song or a DoT reaches its alert threshold.");
+            ImGui.Spacing();
+            Checkbox("Play sound", configuration.PlaySound, value => configuration.PlaySound = value);
+            ImGui.Spacing();
             var volumePct = configuration.SoundVolume * 100f;
-            ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Volume", ref volumePct, 0f, 100f, "%.0f%%"))
+            LabeledSlider("Volume", "##volume", ref volumePct, 0f, 100f, "%.0f%%", value =>
             {
-                configuration.SoundVolume = volumePct / 100f;
+                configuration.SoundVolume = value / 100f;
                 soundAlert.SetVolume(configuration.SoundVolume);
                 configuration.Save();
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("Test sound"))
+            });
+            ImGui.Spacing();
+            if (ImGui.Button("Test sound", new Vector2(ImGui.GetContentRegionAvail().X, 0f)))
                 soundAlert.PlayAlert(0f, ignoreCooldown: true);
-
             ImGui.Spacing();
             ImGui.TextDisabled("This volume only affects the plugin. It does not change the game volume.");
+            EndPanel();
         }
 
         private void DrawBard()
         {
-            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Bard songs");
-            ImGui.Separator();
-            ImGui.TextWrapped("Mage's Ballad, Army's Paeon, and The Wanderer's Minuet. Tracked only while you are on Bard.");
-
-            Checkbox("Always show the song timer", configuration.ShowSongTimer, value => configuration.ShowSongTimer = value);
-            ImGui.TextDisabled("When this is off, the song appears only while it is about to expire.");
-
-            var threshold = configuration.AlertThreshold;
-            ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Ballad / Minuet threshold", ref threshold, 1f, 15f, "%.1f s"))
-            {
-                configuration.AlertThreshold = threshold;
-                configuration.Save();
-            }
-
-            var paeon = configuration.ArmysPaeonThreshold;
-            ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Army's Paeon threshold", ref paeon, 1f, 15f, "%.1f s"))
-            {
-                configuration.ArmysPaeonThreshold = paeon;
-                configuration.Save();
-            }
+            BeginPanel("bst-now-playing", new Vector2(0f, 148f));
+            PanelTitle("Now playing");
+            var active = songTracker.CurrentSong != Song.None;
+            var fraction = active ? Math.Clamp(songTracker.RemainingTime / SongDuration, 0f, 1f) : 0f;
+            var barLabel = active ? $"{songTracker.SongName}    {songTracker.RemainingTime:0.0}s" : "No song active";
+            ImGui.PushStyleColor(ImGuiCol.PlotHistogram, active ? songTracker.SongColorVec4 : new Vector4(0.35f, 0.35f, 0.38f, 1f));
+            ImGui.ProgressBar(fraction, new Vector2(ImGui.GetContentRegionAvail().X, 26f), barLabel);
+            ImGui.PopStyleColor();
+            ImGui.Spacing();
+            ImGui.TextDisabled("Tracked only while you are on Bard. Drag the overlay in game to move it.");
+            EndPanel();
 
             ImGui.Spacing();
+
+            BeginPanel("bst-song-options", new Vector2(0f, 0f));
+            PanelTitle("Alert");
+            Checkbox("Always show the song timer", configuration.ShowSongTimer, value => configuration.ShowSongTimer = value);
+            ImGui.TextDisabled("When this is off, the song appears only while it is about to expire.");
+            ImGui.Spacing();
             ImGui.Separator();
-            ImGui.Text($"Current song: {songTracker.SongName}");
-            ImGui.Text($"Time remaining: {songTracker.RemainingTime:0.0}s");
+            ImGui.Spacing();
+
+            var threshold = configuration.AlertThreshold;
+            LabeledSlider("Mage's Ballad and The Wanderer's Minuet", "##ballad-minuet", ref threshold, 1f, 15f, "%.1f s", value =>
+            {
+                configuration.AlertThreshold = value;
+                configuration.Save();
+            });
+            ImGui.TextDisabled("These two songs share one threshold.");
+            ImGui.Spacing();
+
+            var paeon = configuration.ArmysPaeonThreshold;
+            LabeledSlider("Army's Paeon", "##paeon", ref paeon, 1f, 15f, "%.1f s", value =>
+            {
+                configuration.ArmysPaeonThreshold = value;
+                configuration.Save();
+            });
+            EndPanel();
         }
 
         private void DrawDots()
         {
-            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Damage over time by job");
-            ImGui.Separator();
-
+            BeginPanel("bst-dot-options", new Vector2(0f, 196f));
             Checkbox("Track damage-over-time effects", configuration.TrackDots, value => configuration.TrackDots = value);
             Checkbox("Always show DoT timers", configuration.ShowDotTimer, value => configuration.ShowDotTimer = value);
+            ImGui.Spacing();
 
             var threshold = configuration.DotAlertThreshold;
-            ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Alert threshold", ref threshold, 1f, 15f, "%.1f s"))
+            var sliderWidth = Math.Min(360f, ImGui.GetContentRegionAvail().X);
+            ImGui.Text("Alert threshold");
+            ImGui.SetNextItemWidth(sliderWidth);
+            if (ImGui.SliderFloat("##dot-threshold", ref threshold, 1f, 15f, "%.1f s"))
             {
                 configuration.DotAlertThreshold = threshold;
                 configuration.Save();
@@ -152,39 +208,44 @@ namespace BardSongTracker.Windows
 
             ImGui.TextDisabled("In combat, only your current job is tracked. Enemy effects are read from your current target.");
             ImGui.TextDisabled("Doton, Salted Earth, and Slipstream use the ground-effect timer on you, not on the enemy.");
-            ImGui.Text($"{configuration.EnabledDotCount()} of {DotCatalog.Skills.Count} skills enabled.");
+            EndPanel();
 
             ImGui.Spacing();
             DrawRoleFilters();
+            ImGui.Spacing();
 
-            ImGui.SetNextItemWidth(260);
+            ImGui.SetNextItemWidth(Math.Max(180f, ImGui.GetContentRegionAvail().X - 130f));
             ImGui.InputTextWithHint("##search", "Search job or skill", ref search, 64);
             ImGui.SameLine();
-            Checkbox("Hide jobs without a DoT", hideJobsWithoutDots, value => hideJobsWithoutDots = value);
-            ImGui.SameLine();
-            if (ImGui.Button("Current job"))
+            if (ImGui.Button("Current job", new Vector2(118f, 0f)))
                 SelectCurrentJob();
+
+            var count = $"{configuration.EnabledDotCount()} of {DotCatalog.Skills.Count} skills enabled";
+            Checkbox("Hide jobs without a DoT", hideJobsWithoutDots, value => hideJobsWithoutDots = value);
+            var countWidth = ImGui.CalcTextSize(count).X;
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), ImGui.GetWindowContentRegionMax().X - countWidth));
+            ImGui.TextDisabled(count);
 
             var visibleJobs = VisibleJobs();
             if (visibleJobs.Count > 0 && !ContainsJob(visibleJobs, selectedJobId))
                 selectedJobId = visibleJobs[0].Id;
 
-            var avail = ImGui.GetContentRegionAvail();
-            var listHeight = Math.Max(160f, avail.Y - 4f);
-
-            ImGui.BeginChild("bst-jobs", new Vector2(250, listHeight), true);
+            var listHeight = Math.Max(180f, ImGui.GetContentRegionAvail().Y - 4f);
+            BeginPanel("bst-jobs", new Vector2(248f, listHeight));
             DrawJobList(visibleJobs);
-            ImGui.EndChild();
+            EndPanel();
 
             ImGui.SameLine();
 
-            ImGui.BeginChild("bst-skills", new Vector2(0, listHeight), true);
+            BeginPanel("bst-skills", new Vector2(0f, listHeight));
             DrawSkillList();
-            ImGui.EndChild();
+            EndPanel();
         }
 
         private void DrawRoleFilters()
         {
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 6f);
             RoleButton("All", null);
             ImGui.SameLine();
             RoleButton("Tanks", CombatRole.Tank);
@@ -198,6 +259,7 @@ namespace BardSongTracker.Windows
             RoleButton("Casters", CombatRole.Caster);
             ImGui.SameLine();
             RoleButton("Limited", CombatRole.Limited);
+            ImGui.PopStyleVar();
         }
 
         private void RoleButton(string label, CombatRole? role)
@@ -236,13 +298,21 @@ namespace BardSongTracker.Windows
                 var total = DotCatalog.CountForJob(job.Id);
                 var enabled = CountEnabled(job.Id);
                 var caption = total == 0
-                    ? $"{job.Abbreviation}   {job.Name}"
-                    : $"{job.Abbreviation}   {job.Name}   {enabled}/{total}";
+                    ? $"{job.Abbreviation}    {job.Name}"
+                    : $"{job.Abbreviation}    {job.Name}    {enabled}/{total}";
 
-                ImGui.PushStyleColor(ImGuiCol.Text, DotCatalog.RoleColor(job.Role));
-                if (ImGui.Selectable($"{caption}##job-{job.Id}", selectedJobId == job.Id))
+                var selected = selectedJobId == job.Id;
+                if (selected)
+                {
+                    var color = DotCatalog.RoleColor(job.Role);
+                    ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(color.X, color.Y, color.Z, 0.45f));
+                }
+
+                if (ImGui.Selectable($"{caption}##job-{job.Id}", selected))
                     selectedJobId = job.Id;
-                ImGui.PopStyleColor();
+
+                if (selected)
+                    ImGui.PopStyleColor();
             }
         }
 
@@ -255,8 +325,8 @@ namespace BardSongTracker.Windows
                 return;
             }
 
-            ImGui.TextColored(DotCatalog.RoleColor(job.Role), $"{job.Abbreviation}  {job.Name}");
-            ImGui.Separator();
+            ImGui.TextColored(DotCatalog.RoleColor(job.Role), $"{job.Abbreviation}   {job.Name}");
+            ImGui.Spacing();
 
             var skills = DotCatalog.ForJob(job.Id);
             if (skills.Count == 0)
@@ -272,6 +342,9 @@ namespace BardSongTracker.Windows
                 configuration.SetJobDots(job.Id, false);
 
             ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
             var shown = 0;
             foreach (var skill in skills)
             {
@@ -279,15 +352,7 @@ namespace BardSongTracker.Windows
                     continue;
 
                 shown++;
-                var enabled = configuration.IsDotEnabled(skill.Id);
-                if (ImGui.Checkbox($"{skill.Name}##{skill.Id}", ref enabled))
-                    configuration.SetDotEnabled(skill.Id, enabled);
-
-                ImGui.SameLine();
-                ImGui.TextDisabled(skill.Anchor == DotAnchor.Self ? "on you" : "on target");
-                ImGui.TextDisabled($"   {skill.Detail}");
-                ImGui.TextDisabled($"   {StatusLabels(skill)}");
-                ImGui.Spacing();
+                DrawSkillRow(skill);
             }
 
             if (shown == 0)
@@ -295,11 +360,41 @@ namespace BardSongTracker.Windows
 
             if (dotTracker.Active.Count > 0 && currentJobId() == job.Id)
             {
+                ImGui.Spacing();
                 ImGui.Separator();
-                ImGui.Text("Active on target / on you:");
+                ImGui.Spacing();
+                ImGui.TextDisabled("Active now");
                 foreach (var dot in dotTracker.Active)
-                    ImGui.BulletText($"{dot.Label}  {dot.Remaining:0.0}s");
+                {
+                    var timer = $"{dot.Remaining:0.0}s";
+                    ImGui.BulletText(dot.Label);
+                    var timerWidth = ImGui.CalcTextSize(timer).X;
+                    ImGui.SameLine();
+                    ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), ImGui.GetWindowContentRegionMax().X - timerWidth));
+                    ImGui.Text(timer);
+                }
             }
+        }
+
+        private void DrawSkillRow(DotSkill skill)
+        {
+            var enabled = configuration.IsDotEnabled(skill.Id);
+            if (ImGui.Checkbox($"{skill.Name}##{skill.Id}", ref enabled))
+                configuration.SetDotEnabled(skill.Id, enabled);
+
+            var place = skill.Anchor == DotAnchor.Self ? "on you" : "on target";
+            var placeWidth = ImGui.CalcTextSize(place).X;
+            ImGui.SameLine();
+            ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), ImGui.GetWindowContentRegionMax().X - placeWidth));
+            ImGui.TextDisabled(place);
+
+            ImGui.Indent(26f);
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X);
+            ImGui.TextDisabled(skill.Detail);
+            ImGui.TextDisabled(StatusLabels(skill));
+            ImGui.PopTextWrapPos();
+            ImGui.Unindent(26f);
+            ImGui.Spacing();
         }
 
         private void SelectCurrentJob()
@@ -432,6 +527,35 @@ namespace BardSongTracker.Windows
 
             assign(value);
             configuration.Save();
+        }
+
+        private static void LabeledSlider(string label, string id, ref float value, float min, float max, string format, Action<float> save)
+        {
+            ImGui.Text(label);
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.SliderFloat(id, ref value, min, max, format))
+                save(value);
+        }
+
+        private static void BeginPanel(string id, Vector2 size)
+        {
+            ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 6f);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(14f, 12f));
+            ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(1f, 1f, 1f, 0.04f));
+            ImGui.BeginChild(id, size, true);
+        }
+
+        private static void EndPanel()
+        {
+            ImGui.EndChild();
+            ImGui.PopStyleColor();
+            ImGui.PopStyleVar(2);
+        }
+
+        private static void PanelTitle(string title)
+        {
+            ImGui.TextColored(new Vector4(0.78f, 0.86f, 0.98f, 1f), title);
+            ImGui.Spacing();
         }
     }
 }

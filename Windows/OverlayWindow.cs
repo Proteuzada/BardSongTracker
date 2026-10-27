@@ -56,7 +56,7 @@ namespace BardSongTracker.Windows
             ImGui.SetWindowFontScale(configuration.OverlayScale);
             try
             {
-                DrawLines();
+                DrawPanel();
             }
             finally
             {
@@ -64,7 +64,7 @@ namespace BardSongTracker.Windows
             }
         }
 
-        private void DrawLines()
+        private void DrawPanel()
         {
             BuildLines();
             if (lines.Count == 0)
@@ -73,50 +73,96 @@ namespace BardSongTracker.Windows
                 return;
             }
 
-            var drawList = ImGui.GetWindowDrawList();
             var font = ImGui.GetFont();
             float fontSize = ImGui.GetFontSize();
-            float lineHeight = ImGui.GetTextLineHeightWithSpacing();
-            var origin = ImGui.GetCursorScreenPos();
-            float maxWidth = 40f;
-            const uint shadowColor = 0xCC000000;
-            var shadow = new Vector2(2f, 2f);
+            float rowHeight = ImGui.GetTextLineHeightWithSpacing();
+            const float pad = 10f;
+            const float accentWidth = 3f;
+            const float gap = 10f;
 
-            for (var i = 0; i < lines.Count; i++)
+            float nameWidth = 0f;
+            float timerWidth = 0f;
+            float badgeWidth = 0f;
+            var anyExpiring = false;
+            foreach (var line in lines)
             {
-                var line = lines[i];
-                var color = line.Expiring ? Pulse(line.Color, line.Remaining) : line.Color;
-                var text = line.Expiring ? $"⚠ {line.Text}   EXPIRING" : line.Text;
-                var size = ImGui.CalcTextSize(text);
-                if (size.X > maxWidth)
-                    maxWidth = size.X;
+                nameWidth = Math.Max(nameWidth, ImGui.CalcTextSize(line.Name).X);
+                timerWidth = Math.Max(timerWidth, ImGui.CalcTextSize(line.Timer).X);
+                if (!line.Expiring)
+                    continue;
 
-                var pos = new Vector2(origin.X, origin.Y + (lineHeight * i));
-                drawList.AddText(font, fontSize, pos + shadow, shadowColor, text);
-                drawList.AddText(font, fontSize, pos, ImGui.ColorConvertFloat4ToU32(color), text);
+                anyExpiring = true;
+                badgeWidth = Math.Max(badgeWidth, ImGui.CalcTextSize("EXPIRING").X);
             }
 
-            ImGui.Dummy(new Vector2(maxWidth, lineHeight * lines.Count));
+            float badgeGap = anyExpiring ? gap : 0f;
+            float width = pad + accentWidth + gap + nameWidth + gap + badgeWidth + badgeGap + timerWidth + pad;
+            float height = pad * 2f;
+            foreach (var line in lines)
+                height += rowHeight + (line.GapBefore ? 6f : 0f);
+
+            var origin = ImGui.GetCursorScreenPos();
+            var drawList = ImGui.GetWindowDrawList();
+            var panelMax = origin + new Vector2(width, height);
+            var background = ImGui.ColorConvertFloat4ToU32(new Vector4(0.04f, 0.05f, 0.07f, 0.82f));
+            var border = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.10f));
+            drawList.AddRectFilled(origin, panelMax, background, 8f, ImDrawFlags.RoundCornersAll);
+            drawList.AddRect(origin, panelMax, border, 8f, ImDrawFlags.RoundCornersAll, 1f);
+
+            float y = origin.Y + pad;
+            foreach (var line in lines)
+            {
+                if (line.GapBefore)
+                    y += 6f;
+
+                var color = line.Expiring ? Pulse(line.Color, line.Remaining) : line.Color;
+                var packed = ImGui.ColorConvertFloat4ToU32(color);
+                var textY = y + (rowHeight - fontSize) * 0.5f;
+                var accentMin = new Vector2(origin.X + pad, y + 3f);
+                var accentMax = new Vector2(origin.X + pad + accentWidth, y + rowHeight - 3f);
+                drawList.AddRectFilled(accentMin, accentMax, packed, 2f);
+
+                var nameX = origin.X + pad + accentWidth + gap;
+                drawList.AddText(font, fontSize, new Vector2(nameX, textY), packed, line.Name);
+
+                var timerX = origin.X + width - pad - timerWidth;
+                if (line.Expiring)
+                {
+                    var badgeColor = line.Remaining <= 2f
+                        ? new Vector4(1f, 0.35f, 0.32f, 1f)
+                        : new Vector4(1f, 0.72f, 0.28f, 1f);
+                    var badgeX = timerX - gap - badgeWidth;
+                    drawList.AddText(font, fontSize, new Vector2(badgeX, textY), ImGui.ColorConvertFloat4ToU32(badgeColor), "EXPIRING");
+                }
+
+                drawList.AddText(font, fontSize, new Vector2(timerX, textY), packed, line.Timer);
+                y += rowHeight;
+            }
+
+            ImGui.Dummy(new Vector2(width, height));
         }
 
         private void BuildLines()
         {
             lines.Clear();
 
-            if (SongVisible())
+            var hasSong = SongVisible();
+            if (hasSong)
             {
                 var threshold = SongThreshold();
-                var expiring = songTracker.IsExpiring(threshold);
                 lines.Add(new OverlayLine(
-                    $"{songTracker.ShortName}   {songTracker.RemainingTime:0.0}s",
+                    songTracker.ShortName,
+                    $"{songTracker.RemainingTime:0.0}s",
                     songTracker.SongColorVec4,
-                    expiring,
-                    songTracker.RemainingTime));
+                    songTracker.IsExpiring(threshold),
+                    songTracker.RemainingTime,
+                    false));
             }
 
             if (!configuration.TrackDots)
                 return;
 
+            var firstDot = hasSong;
             foreach (var dot in dotTracker.Active)
             {
                 var expiring = dot.Remaining > 0f && dot.Remaining <= configuration.DotAlertThreshold;
@@ -124,10 +170,13 @@ namespace BardSongTracker.Windows
                     continue;
 
                 lines.Add(new OverlayLine(
-                    $"{dot.Label}   {dot.Remaining:0.0}s",
+                    dot.Label,
+                    $"{dot.Remaining:0.0}s",
                     DotCatalog.RoleColor(dot.Role),
                     expiring,
-                    dot.Remaining));
+                    dot.Remaining,
+                    firstDot));
+                firstDot = false;
             }
         }
 
@@ -171,6 +220,12 @@ namespace BardSongTracker.Windows
             return Vector4.Lerp(baseColor, alert, pulse);
         }
 
-        private readonly record struct OverlayLine(string Text, Vector4 Color, bool Expiring, float Remaining);
+        private readonly record struct OverlayLine(
+            string Name,
+            string Timer,
+            Vector4 Color,
+            bool Expiring,
+            float Remaining,
+            bool GapBefore);
     }
 }
