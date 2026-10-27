@@ -10,7 +10,7 @@ The menu has three tabs:
 
 In combat, only your current job is tracked. Enemy effects are read from your current target. Doton, Salted Earth, and Slipstream use the ground-effect timer on you.
 
-Jobs without a player damage-over-time effect (Warrior, Reaper, Viper, Dancer, and Red Mage) stay in the list so that is explicit. Fanged Muse is included as the Pictomancer DoT in PvP. Song of Torment and Nightbloom share one status. Bad Breath is omitted because its poison does not have a unique status id.
+Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the list so that is explicit. Reaper tracks Death's Design. Fanged Muse is included as the Pictomancer DoT in PvP. Song of Torment and Nightbloom share one status. Bad Breath is omitted because its poison does not have a unique status id.
 
 - Target: `net10.0-windows`
 - Dalamud API 15, DalamudPackager 15.0.0

@@ -331,7 +331,7 @@ namespace BardSongTracker.Windows
             var skills = DotCatalog.ForJob(job.Id);
             if (skills.Count == 0)
             {
-                ImGui.TextWrapped("This job does not apply a player damage-over-time effect. Warrior, Reaper, Viper, Dancer, and Red Mage are listed for that reason.");
+                ImGui.TextWrapped("This job does not apply a tracked effect. Warrior, Viper, Dancer, and Red Mage are listed for that reason.");
                 return;
             }
 

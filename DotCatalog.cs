@@ -247,6 +247,8 @@ namespace BardSongTracker
                     T(501, "Doton"), T(3187, "Doton")),
                 S("sam-higanbana", 34, "Higanbana", "DoT on the target.", DotAnchor.Target,
                     T(1228, "Higanbana"), T(1319, "Higanbana")),
+                S("rpr-deaths-design", 39, "Death's Design", "Debuff on the target. Applied by Shadow of Death, Whorl of Death, and Harvest Moon.", DotAnchor.Target,
+                    T(2586, "Death's Design")),
 
                 // Physical ranged
                 S("brd-caustic-bite", 23, "Caustic Bite", "Includes Venomous Bite.", DotAnchor.Target,
