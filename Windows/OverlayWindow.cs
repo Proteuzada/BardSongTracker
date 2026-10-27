@@ -86,7 +86,7 @@ namespace BardSongTracker.Windows
             {
                 var line = lines[i];
                 var color = line.Expiring ? Pulse(line.Color, line.Remaining) : line.Color;
-                var text = line.Expiring ? $"⚠ {line.Text}   EXPIRANDO" : line.Text;
+                var text = line.Expiring ? $"⚠ {line.Text}   EXPIRING" : line.Text;
                 var size = ImGui.CalcTextSize(text);
                 if (size.X > maxWidth)
                     maxWidth = size.X;

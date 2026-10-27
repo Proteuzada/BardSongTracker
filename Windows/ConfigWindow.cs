@@ -48,7 +48,7 @@ namespace BardSongTracker.Windows
             if (!ImGui.BeginTabBar("bst-tabs"))
                 return;
 
-            if (ImGui.BeginTabItem("Geral"))
+            if (ImGui.BeginTabItem("General"))
             {
                 DrawGeneral();
                 ImGui.EndTabItem();
@@ -71,16 +71,16 @@ namespace BardSongTracker.Windows
 
         private void DrawGeneral()
         {
-            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Overlay e som");
+            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Overlay and sound");
             ImGui.Separator();
-            ImGui.TextWrapped("O overlay mostra a música do Bardo e os DoTs do job atual. O som toca quando algum deles entra no limiar.");
+            ImGui.TextWrapped("The overlay shows the Bard song and the current job's damage-over-time effects. A sound plays when one of them reaches the alert threshold.");
 
-            Checkbox("Mostrar overlay", configuration.ShowOverlay, value => configuration.ShowOverlay = value);
-            Checkbox("Tocar som", configuration.PlaySound, value => configuration.PlaySound = value);
+            Checkbox("Show overlay", configuration.ShowOverlay, value => configuration.ShowOverlay = value);
+            Checkbox("Play sound", configuration.PlaySound, value => configuration.PlaySound = value);
 
             var scale = configuration.OverlayScale;
             ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Escala do overlay", ref scale, 0.6f, 3.0f, "%.1f"))
+            if (ImGui.SliderFloat("Overlay scale", ref scale, 0.6f, 3.0f, "%.1f"))
             {
                 configuration.OverlayScale = scale;
                 configuration.Save();
@@ -96,25 +96,25 @@ namespace BardSongTracker.Windows
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("Testar som"))
+            if (ImGui.Button("Test sound"))
                 soundAlert.PlayAlert(0f, ignoreCooldown: true);
 
             ImGui.Spacing();
-            ImGui.TextDisabled("O volume é da sessão do plugin. Não mexe no volume do jogo.");
+            ImGui.TextDisabled("This volume only affects the plugin. It does not change the game volume.");
         }
 
         private void DrawBard()
         {
-            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Músicas do Bardo");
+            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Bard songs");
             ImGui.Separator();
-            ImGui.TextWrapped("Mage's Ballad, Army's Paeon e The Wanderer's Minuet. Só acompanha enquanto você está de Bard.");
+            ImGui.TextWrapped("Mage's Ballad, Army's Paeon, and The Wanderer's Minuet. Tracked only while you are on Bard.");
 
-            Checkbox("Mostrar o timer da música o tempo todo", configuration.ShowSongTimer, value => configuration.ShowSongTimer = value);
-            ImGui.TextDisabled("Desligado, a música só aparece na tela quando está expirando.");
+            Checkbox("Always show the song timer", configuration.ShowSongTimer, value => configuration.ShowSongTimer = value);
+            ImGui.TextDisabled("When this is off, the song appears only while it is about to expire.");
 
             var threshold = configuration.AlertThreshold;
             ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Limiar Ballad / Minuet", ref threshold, 1f, 15f, "%.1f s"))
+            if (ImGui.SliderFloat("Ballad / Minuet threshold", ref threshold, 1f, 15f, "%.1f s"))
             {
                 configuration.AlertThreshold = threshold;
                 configuration.Save();
@@ -122,7 +122,7 @@ namespace BardSongTracker.Windows
 
             var paeon = configuration.ArmysPaeonThreshold;
             ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Limiar Army's Paeon", ref paeon, 1f, 15f, "%.1f s"))
+            if (ImGui.SliderFloat("Army's Paeon threshold", ref paeon, 1f, 15f, "%.1f s"))
             {
                 configuration.ArmysPaeonThreshold = paeon;
                 configuration.Save();
@@ -130,39 +130,39 @@ namespace BardSongTracker.Windows
 
             ImGui.Spacing();
             ImGui.Separator();
-            ImGui.Text($"Música agora: {songTracker.SongName}");
-            ImGui.Text($"Tempo restante: {songTracker.RemainingTime:0.0}s");
+            ImGui.Text($"Current song: {songTracker.SongName}");
+            ImGui.Text($"Time remaining: {songTracker.RemainingTime:0.0}s");
         }
 
         private void DrawDots()
         {
-            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "DoTs por job");
+            ImGui.TextColored(new Vector4(0.45f, 0.78f, 1f, 1f), "Damage over time by job");
             ImGui.Separator();
 
-            Checkbox("Rastrear DoTs", configuration.TrackDots, value => configuration.TrackDots = value);
-            Checkbox("Mostrar o timer do DoT o tempo todo", configuration.ShowDotTimer, value => configuration.ShowDotTimer = value);
+            Checkbox("Track damage-over-time effects", configuration.TrackDots, value => configuration.TrackDots = value);
+            Checkbox("Always show DoT timers", configuration.ShowDotTimer, value => configuration.ShowDotTimer = value);
 
             var threshold = configuration.DotAlertThreshold;
             ImGui.SetNextItemWidth(280);
-            if (ImGui.SliderFloat("Limiar do alerta", ref threshold, 1f, 15f, "%.1f s"))
+            if (ImGui.SliderFloat("Alert threshold", ref threshold, 1f, 15f, "%.1f s"))
             {
                 configuration.DotAlertThreshold = threshold;
                 configuration.Save();
             }
 
-            ImGui.TextDisabled("Em combate só entra o job que você está jogando. O alvo atual mostra o DoT nele.");
-            ImGui.TextDisabled("Doton, Salted Earth e Slipstream usam o tempo da poça em você, não no inimigo.");
-            ImGui.Text($"{configuration.EnabledDotCount()} de {DotCatalog.Skills.Count} skills ligadas.");
+            ImGui.TextDisabled("In combat, only your current job is tracked. Enemy effects are read from your current target.");
+            ImGui.TextDisabled("Doton, Salted Earth, and Slipstream use the ground-effect timer on you, not on the enemy.");
+            ImGui.Text($"{configuration.EnabledDotCount()} of {DotCatalog.Skills.Count} skills enabled.");
 
             ImGui.Spacing();
             DrawRoleFilters();
 
             ImGui.SetNextItemWidth(260);
-            ImGui.InputTextWithHint("##busca", "Buscar job ou skill", ref search, 64);
+            ImGui.InputTextWithHint("##search", "Search job or skill", ref search, 64);
             ImGui.SameLine();
-            Checkbox("Ocultar jobs sem DoT", hideJobsWithoutDots, value => hideJobsWithoutDots = value);
+            Checkbox("Hide jobs without a DoT", hideJobsWithoutDots, value => hideJobsWithoutDots = value);
             ImGui.SameLine();
-            if (ImGui.Button("Job atual"))
+            if (ImGui.Button("Current job"))
                 SelectCurrentJob();
 
             var visibleJobs = VisibleJobs();
@@ -185,7 +185,7 @@ namespace BardSongTracker.Windows
 
         private void DrawRoleFilters()
         {
-            RoleButton("Todos", null);
+            RoleButton("All", null);
             ImGui.SameLine();
             RoleButton("Tanks", CombatRole.Tank);
             ImGui.SameLine();
@@ -218,7 +218,7 @@ namespace BardSongTracker.Windows
             CombatRole? lastRole = null;
             if (jobs.Count == 0)
             {
-                ImGui.TextDisabled("Nenhum job nesse filtro.");
+                ImGui.TextDisabled("No jobs match this filter.");
                 return;
             }
 
@@ -251,7 +251,7 @@ namespace BardSongTracker.Windows
             var job = FindJob(selectedJobId);
             if (job == null)
             {
-                ImGui.TextDisabled("Escolha um job.");
+                ImGui.TextDisabled("Select a job.");
                 return;
             }
 
@@ -261,14 +261,14 @@ namespace BardSongTracker.Windows
             var skills = DotCatalog.ForJob(job.Id);
             if (skills.Count == 0)
             {
-                ImGui.TextWrapped("Este job não aplica um DoT de jogador. Warrior, Reaper, Viper, Dancer e Red Mage ficam nesta lista.");
+                ImGui.TextWrapped("This job does not apply a player damage-over-time effect. Warrior, Reaper, Viper, Dancer, and Red Mage are listed for that reason.");
                 return;
             }
 
-            if (ImGui.Button("Ligar todas"))
+            if (ImGui.Button("Enable all"))
                 configuration.SetJobDots(job.Id, true);
             ImGui.SameLine();
-            if (ImGui.Button("Desligar todas"))
+            if (ImGui.Button("Disable all"))
                 configuration.SetJobDots(job.Id, false);
 
             ImGui.Spacing();
@@ -284,19 +284,19 @@ namespace BardSongTracker.Windows
                     configuration.SetDotEnabled(skill.Id, enabled);
 
                 ImGui.SameLine();
-                ImGui.TextDisabled(skill.Anchor == DotAnchor.Self ? "em você" : "no alvo");
+                ImGui.TextDisabled(skill.Anchor == DotAnchor.Self ? "on you" : "on target");
                 ImGui.TextDisabled($"   {skill.Detail}");
                 ImGui.TextDisabled($"   {StatusLabels(skill)}");
                 ImGui.Spacing();
             }
 
             if (shown == 0)
-                ImGui.TextDisabled("Nenhuma skill combina com a busca.");
+                ImGui.TextDisabled("No skills match this search.");
 
             if (dotTracker.Active.Count > 0 && currentJobId() == job.Id)
             {
                 ImGui.Separator();
-                ImGui.Text("No alvo / em você agora:");
+                ImGui.Text("Active on target / on you:");
                 foreach (var dot in dotTracker.Active)
                     ImGui.BulletText($"{dot.Label}  {dot.Remaining:0.0}s");
             }

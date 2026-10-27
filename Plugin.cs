@@ -68,7 +68,7 @@ namespace BardSongTracker
 
             CommandManager.AddHandler("/bst", new CommandInfo(OnCommand)
             {
-                HelpMessage = "Abre o menu do BardSongTracker (músicas e DoTs)."
+                HelpMessage = "Open the BardSongTracker menu (songs and DoTs)."
             });
 
             PluginInterface.UiBuilder.Draw += DrawUI;

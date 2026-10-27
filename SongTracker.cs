@@ -24,10 +24,10 @@ namespace BardSongTracker
         /// </summary>
         public string SongName => CurrentSong switch
         {
-            Song.MagesBallad => "Mage's Ballad (Balada do Mago)",
-            Song.ArmysPaeon => "Army's Paeon (Peã do Exército)",
-            Song.WanderersMinuet => "The Wanderer's Minuet (Minueto do Errante)",
-            _ => "No Song Active"
+            Song.MagesBallad => "Mage's Ballad",
+            Song.ArmysPaeon => "Army's Paeon",
+            Song.WanderersMinuet => "The Wanderer's Minuet",
+            _ => "No song active"
         };
 
         /// <summary>

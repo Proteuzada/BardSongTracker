@@ -1,44 +1,44 @@
 # BardSongTracker
 
-Plugin de Dalamud para o timer das músicas do Bardo e dos DoTs de tank, healer e DPS. O overlay mostra o tempo que falta e o som toca quando entra no limiar. Comando no jogo: `/bst`.
+Dalamud plugin that tracks Bard songs and damage-over-time effects for tanks, healers, and DPS. The overlay shows the time remaining, and a sound plays when an effect reaches the alert threshold. In-game command: `/bst`.
 
-O menu tem três abas:
+The menu has three tabs:
 
-- **Geral** — overlay, volume e teste do som
-- **Bard** — limiar de Mage's Ballad, Army's Paeon e The Wanderer's Minuet
-- **DoTs** — filtro por função e job, busca, e um interruptor por skill
+- **General** — overlay, volume, and sound test
+- **Bard** — thresholds for Mage's Ballad, Army's Paeon, and The Wanderer's Minuet
+- **DoTs** — role and job filters, search, and a toggle for each skill
 
-Em combate só o job atual é monitorado. DoT no inimigo usa o alvo atual. Doton, Salted Earth e Slipstream usam o tempo da poça em você.
+In combat, only your current job is tracked. Enemy effects are read from your current target. Doton, Salted Earth, and Slipstream use the ground-effect timer on you.
 
-Jobs sem DoT de jogador (Warrior, Reaper, Viper, Dancer, Red Mage) aparecem no menu para deixar isso explícito. Fanged Muse entra como DoT de Pictomancer no PvP. Song of Torment e Nightbloom dividem o mesmo status. Bad Breath não entra: o veneno dele não tem um status id só dele.
+Jobs without a player damage-over-time effect (Warrior, Reaper, Viper, Dancer, and Red Mage) stay in the list so that is explicit. Fanged Muse is included as the Pictomancer DoT in PvP. Song of Torment and Nightbloom share one status. Bad Breath is omitted because its poison does not have a unique status id.
 
-- Alvo: `net10.0-windows`
+- Target: `net10.0-windows`
 - Dalamud API 15, DalamudPackager 15.0.0
-- Áudio: NAudio 2.2.1 (WASAPI), arquivo `Resources/alert.mp3` embutido na DLL
+- Audio: NAudio 2.2.1 (WASAPI), with `Resources/alert.mp3` embedded in the DLL
 
-## Instalar pelo Dalamud, sem compilar
+## Install from Dalamud, without compiling
 
-O plugin já está compilado para Dalamud API 15. No jogo, abra `/xlsettings`, vá em **Experimental** e adicione este repositório customizado:
+The plugin is already built for Dalamud API 15. In game, open `/xlsettings`, go to **Experimental**, and add this custom plugin repository:
 
 ```
 https://raw.githubusercontent.com/Proteuzada/BardSongTracker/main/pluginmaster.json
 ```
 
-Salve, abra o instalador de plugins (`/xlplugins`) e instale **BardSongTracker**. O zip inclui a DLL, o manifesto e o NAudio. O repositório público é https://github.com/Proteuzada/BardSongTracker.
+Save, open the plugin installer (`/xlplugins`), and install **BardSongTracker**. The zip includes the DLL, the manifest, and NAudio. The public repository is https://github.com/Proteuzada/BardSongTracker.
 
 ## Build
 
-As referências do Dalamud vêm de `%AppData%\XIVLauncher\addon\Hooks\dev\`. Abra a pasta no Visual Studio ou no Rider e compile em Release, ou:
+Dalamud references come from `%AppData%\XIVLauncher\addon\Hooks\dev\`. Open the folder in Visual Studio or Rider and build Release, or run:
 
 ```powershell
 dotnet build BardSongTracker.csproj -c Release
 ```
 
-A saída fica em `bin\Release\`.
+The output is in `bin\Release\`.
 
-## Instalar para testar
+## Install for testing
 
-Copie estes arquivos de `bin\Release\` para `%AppData%\XIVLauncher\devPlugins\BardSongTracker\`:
+Copy these files from `bin\Release\` to `%AppData%\XIVLauncher\devPlugins\BardSongTracker\`:
 
 - `BardSongTracker.dll`
 - `BardSongTracker.json`
@@ -46,6 +46,6 @@ Copie estes arquivos de `bin\Release\` para `%AppData%\XIVLauncher\devPlugins\Ba
 - `NAudio.Core.dll`
 - `NAudio.Wasapi.dll`
 
-Ative os dev plugins no Dalamud e carregue pelo `/xlplugins`.
+Enable dev plugins in Dalamud and load the plugin from `/xlplugins`.
 
-Não use uma pasta `ReadyToInstall` antiga. O build anterior dessa pasta tinha uma DLL menor, sem o MP3 e sem o NAudio, e o plugin não carrega o som desta versão sem essas DLLs ao lado.
+Do not use an old `ReadyToInstall` folder. That earlier build had a smaller DLL, with no MP3 and no NAudio, and this version cannot play the alert without those DLLs beside it.
