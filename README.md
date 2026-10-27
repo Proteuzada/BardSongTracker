@@ -14,7 +14,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 - Target: `net10.0-windows`
 - Dalamud API 15, DalamudPackager 15.0.0
-- Audio: NAudio 2.2.1 (WASAPI), with `Resources/alert.mp3` embedded in the DLL
+- Audio: NAudio 2.2.1 (WASAPI). The General tab picks one of the short embedded alerts. Classic is the original sound; the others are original chimes.
 
 ## Install from Dalamud, without compiling
 

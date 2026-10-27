@@ -59,6 +59,7 @@ namespace BardSongTracker
             DotTracker = new DotTracker();
             SoundAlert = new SoundAlert();
             SoundAlert.SetVolume(Configuration.SoundVolume);
+            SoundAlert.SetSound(Configuration.AlertSoundId);
 
             ConfigWindow = new ConfigWindow(Configuration, SongTracker, DotTracker, SoundAlert, CurrentJobId);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);

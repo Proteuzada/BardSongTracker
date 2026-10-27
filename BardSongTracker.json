@@ -4,7 +4,7 @@
   "Punchline": "Timers and sound alerts for Bard songs and job DoTs.",
   "Description": "Tracks Bard songs and damage-over-time effects from tanks, healers, and DPS. Shows an overlay timer and plays a sound when they are about to expire. Each skill can be enabled per job.",
   "InternalName": "BardSongTracker",
-  "AssemblyVersion": "1.1.3.0",
+  "AssemblyVersion": "1.1.4.0",
   "RepoUrl": "",
   "ApplicableVersion": "any",
   "Tags": ["bard", "brd", "dot", "tracker", "overlay"],

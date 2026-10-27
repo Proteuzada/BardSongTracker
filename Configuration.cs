@@ -20,6 +20,11 @@ namespace BardSongTracker
         public float OverlayScale { get; set; } = 1.5f;
         public float SoundVolume { get; set; } = 0.3f;
 
+        /// <summary>
+        /// Id from <see cref="AlertSounds"/>. Unknown values fall back to Classic.
+        /// </summary>
+        public string AlertSoundId { get; set; } = AlertSounds.DefaultId;
+
         public bool TrackDots { get; set; } = true;
         public bool ShowDotTimer { get; set; } = true;
         public float DotAlertThreshold { get; set; } = 5.0f;
