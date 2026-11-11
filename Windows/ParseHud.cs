@@ -11,8 +11,6 @@ namespace BardSongTracker.Windows
 {
     public static class ParseHud
     {
-        private static readonly Dictionary<string, int> heldParse = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly HashSet<string> seenParse = new(StringComparer.OrdinalIgnoreCase);
         private static string? selectedName;
 
         public static bool DetailOpen => selectedName != null;
@@ -71,8 +69,6 @@ namespace BardSongTracker.Windows
 
                 if (rows.Length == 0)
                 {
-                    heldParse.Clear();
-                    seenParse.Clear();
                     selectedName = null;
                     DrawNote(snap.Note, top + header + 2f, size.X);
                     return;
@@ -89,8 +85,7 @@ namespace BardSongTracker.Windows
                     if (shown >= 8 || y + rowH > size.Y - reserve + 1f)
                         break;
 
-                    var raw = RoleParse(row, rows, snap.Duration.TotalSeconds);
-                    if (DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, shareCol, deathCol, raw, nameSize, textures, columns))
+                    if (DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, shareCol, deathCol, nameSize, textures, columns))
                         clicked = row.Name;
 
                     y += rowH;
@@ -122,8 +117,6 @@ namespace BardSongTracker.Windows
                     DrawNote(onlyYou ? "Waiting for your damage." : snap.Note, top + header + 2f, size.X);
                 else if (detail is { } chosen)
                     DrawDetail(chosen, y, size.X, fontSize, columns.Abbreviate);
-
-                ForgetUnseen();
             }
             finally
             {
@@ -143,6 +136,8 @@ namespace BardSongTracker.Windows
                 text = "Last pull  " + text;
             if (!string.IsNullOrWhiteSpace(snap.ZoneName))
                 text = text + "  " + snap.ZoneName.Trim();
+            if (!string.IsNullOrWhiteSpace(snap.BossName))
+                text = text + "  " + snap.BossName.Trim();
 
             var textY = origin.Y + Math.Max(0f, (height - fontSize) * 0.5f);
             ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X + 8f, textY), muted, Fit(text, width - 16f, fontSize));
@@ -187,14 +182,17 @@ namespace BardSongTracker.Windows
             ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y), muted, Fit(text, width, fontSize));
         }
 
-        private static bool DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, float shareCol, float deathCol, int raw, float nameSize, ITextureProvider textures, MeterColumns columns)
+        private static bool DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, float shareCol, float deathCol, float nameSize, ITextureProvider textures, MeterColumns columns)
         {
             var font = ImGui.GetFont();
             var fontSize = ImGui.GetFontSize();
             var origin = ImGui.GetCursorScreenPos();
             var drawList = ImGui.GetWindowDrawList();
-            var parse = HoldParse(row.Name, raw, row.TimeDead >= 1d);
-            var color = PercentileScale.Color(parse);
+            var known = row.Parse >= 0;
+            var parse = known ? row.Parse : 0;
+            var color = known
+                ? PercentileScale.Color(parse)
+                : new Vector4(0.55f, 0.58f, 0.64f, 1f);
             var min = origin + new Vector2(0f, y);
             var max = origin + new Vector2(width, y + rowH);
             var track = ImGui.ColorConvertFloat4ToU32(new Vector4(0.04f, 0.045f, 0.06f, 0.55f));
@@ -207,8 +205,9 @@ namespace BardSongTracker.Windows
             var deathColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.95f, 0.45f, 0.42f, 1f));
 
             drawList.AddRectFilled(min, max, track, 2f);
-            if (parse > 0)
-                drawList.AddRectFilled(min, new Vector2(min.X + (width * (parse / 100f)), max.Y), fill, 2f);
+            var portion = known ? parse / 100f : Math.Clamp(row.Share / 100f, 0f, 1f);
+            if (portion > 0)
+                drawList.AddRectFilled(min, new Vector2(min.X + (width * portion), max.Y), fill, 2f);
 
             var textY = min.Y + Math.Max(0f, (rowH - fontSize) * 0.5f);
             var nameY = min.Y + Math.Max(0f, (rowH - nameSize) * 0.5f);
@@ -219,7 +218,7 @@ namespace BardSongTracker.Windows
             var iconX = min.X + 8f + dpsCol + 6f;
             var nameX = iconX + icon + 4f;
             DrawJobIcon(drawList, textures, row.JobId, iconX, min.Y + Math.Max(0f, (rowH - icon) * 0.5f), icon);
-            var parseText = parse.ToString(CultureInfo.InvariantCulture);
+            var parseText = known ? parse.ToString(CultureInfo.InvariantCulture) : "–";
             var parseX = max.X - 8f - parseCol;
             var shareX = parseX - (columns.DamagePercent ? shareCol + 6f : 0f);
             var deathX = shareX - (columns.Deaths ? deathCol + 4f : 0f);
@@ -286,80 +285,6 @@ namespace BardSongTracker.Windows
         private static float ClampScale(float meterScale)
         {
             return Math.Clamp(meterScale, 0.8f, 2.5f);
-        }
-
-        private static int RoleParse(MeterRow row, MeterRow[] rows, double duration)
-        {
-            if (duration <= 0 || row.Dps <= 0)
-                return 0;
-
-            var role = FightRole(row.JobId);
-            var cleanBest = 0d;
-            foreach (var other in rows)
-            {
-                if (FightRole(other.JobId) != role || other.TimeDead >= 1d)
-                    continue;
-                if (other.Dps > cleanBest)
-                    cleanBest = other.Dps;
-            }
-
-            var pace = row.AliveSeconds > 0.5 ? row.Damage / row.AliveSeconds : row.Dps;
-            var reference = row.TimeDead >= 1d ? Math.Max(cleanBest, pace) : Math.Max(cleanBest, row.Dps);
-            if (reference <= 0)
-                return 0;
-
-            return (int)Math.Clamp(Math.Floor(row.Dps / reference * 100d), 0, 100);
-        }
-
-        private static int HoldParse(string name, int raw, bool steadyDrop)
-        {
-            var key = string.IsNullOrWhiteSpace(name) ? "Player" : name;
-            seenParse.Add(key);
-            if (!heldParse.TryGetValue(key, out var held))
-                held = raw;
-            else if (raw > held || steadyDrop || held - raw >= 2)
-                held = raw;
-
-            heldParse[key] = held;
-            return held;
-        }
-
-        private static void ForgetUnseen()
-        {
-            if (heldParse.Count != seenParse.Count)
-            {
-                List<string>? drop = null;
-                foreach (var key in heldParse.Keys)
-                {
-                    if (!seenParse.Contains(key))
-                        (drop ??= new List<string>()).Add(key);
-                }
-
-                if (drop != null)
-                {
-                    foreach (var key in drop)
-                        heldParse.Remove(key);
-                }
-            }
-
-            seenParse.Clear();
-        }
-
-        private static CombatRole FightRole(int jobId)
-        {
-            var role = DotCatalog.RoleOf((uint)jobId);
-            if (role != CombatRole.Limited)
-                return role;
-
-            return jobId switch
-            {
-                1 or 3 => CombatRole.Tank,
-                6 => CombatRole.Healer,
-                2 or 4 or 29 => CombatRole.Melee,
-                5 => CombatRole.PhysicalRanged,
-                7 or 26 => CombatRole.Caster,
-                _ => CombatRole.Limited,
-            };
         }
 
         private static int Rate(int part, int total)

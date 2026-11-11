@@ -40,6 +40,8 @@ namespace BardSongTracker
         public bool KeepLastPull { get; set; } = true;
         public bool AbbreviateNumbers { get; set; } = true;
         public string ActLogDirectory { get; set; } = "";
+        public string FflogsClientId { get; set; } = "";
+        public string FflogsClientSecret { get; set; } = "";
         public string RankingsPath { get; set; } = "";
         public float PullIdleSeconds { get; set; } = 25f;
 

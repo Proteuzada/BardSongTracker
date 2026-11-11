@@ -1,0 +1,544 @@
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace BardSongTracker.Parse
+{
+    /// <summary>
+    /// Loads the FF Logs ranking curve for the boss on screen. The parse is the
+    /// site's percentile of boss rDPS for that job, interpolated the same way
+    /// the historical score is.
+    /// </summary>
+    public sealed class RankingClient
+    {
+        private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
+        private static readonly int[] Marks = { 10, 25, 50, 75, 90, 95, 99, 100 };
+
+        private readonly string cachePath;
+        private readonly RankingTable table;
+        private readonly List<ZoneInfo> zones = new();
+        private readonly object gate = new();
+        private string token = "";
+        private DateTimeOffset tokenUntil;
+        private int fetching;
+        private string status = "Add an FF Logs API client on the Logs tab. The parse stays blank until the curve for this boss is loaded.";
+        private string attemptKey = "";
+        private DateTimeOffset retryAfter;
+
+        public RankingClient(string cachePath)
+        {
+            this.cachePath = cachePath ?? "";
+            table = string.IsNullOrWhiteSpace(cachePath) ? new RankingTable() : RankingTable.Load(cachePath);
+        }
+
+        public RankingTable Table => table;
+
+        public string Status
+        {
+            get
+            {
+                lock (gate)
+                    return status;
+            }
+        }
+
+        public void Consider(ParseSnapshot snap, string? clientId, string? clientSecret)
+        {
+            var id = clientId?.Trim() ?? "";
+            var secret = clientSecret?.Trim() ?? "";
+            if (id.Length == 0 || secret.Length == 0)
+            {
+                SetStatus("Add an FF Logs API client on the Logs tab. The parse stays blank until the curve for this boss is loaded.");
+                return;
+            }
+
+            if (snap.Rows.Length == 0 || string.IsNullOrWhiteSpace(snap.ZoneName) || string.IsNullOrWhiteSpace(snap.BossName))
+                return;
+
+            var jobs = new List<int>();
+            foreach (var row in snap.Rows)
+            {
+                if (row.JobId > 0 && SpecName(row.JobId).Length > 0 && !jobs.Contains(row.JobId))
+                    jobs.Add(row.JobId);
+            }
+
+            if (jobs.Count == 0)
+                return;
+
+            jobs.Sort();
+            var key = snap.ZoneName + "|" + snap.BossName + "|" + snap.PartySize + "|" + string.Join(",", jobs);
+            if (key == attemptKey && DateTimeOffset.UtcNow < retryAfter)
+                return;
+
+            var missing = false;
+            foreach (var job in jobs)
+            {
+                if (!table.TryFresh(snap.ZoneName, snap.BossName, job, TimeSpan.FromHours(12), out _))
+                    missing = true;
+            }
+
+            if (!missing)
+            {
+                attemptKey = key;
+                retryAfter = DateTimeOffset.UtcNow.AddHours(12);
+                SetStatus("Parse curve loaded for " + snap.BossName.Trim() + ".");
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref fetching, 1, 0) != 0)
+                return;
+
+            var zone = snap.ZoneName;
+            var boss = snap.BossName;
+            var size = snap.PartySize;
+            SetStatus("Loading the FF Logs curve for " + boss.Trim() + ".");
+            Task.Run(() => Fetch(zone, boss, size, jobs, id, secret, key));
+        }
+
+        private async Task Fetch(string zone, string boss, int partySize, List<int> jobs, string clientId, string clientSecret, string key)
+        {
+            try
+            {
+                var access = await Token(clientId, clientSecret);
+                var encounter = await FindEncounter(access, zone, boss);
+                if (encounter == 0)
+                {
+                    attemptKey = key;
+                    retryAfter = DateTimeOffset.UtcNow.AddMinutes(10);
+                    SetStatus("FF Logs has no encounter matching " + boss.Trim() + " in " + zone.Trim() + ".");
+                    return;
+                }
+
+                var loaded = 0;
+                foreach (var job in jobs)
+                {
+                    if (table.TryFresh(zone, boss, job, TimeSpan.FromHours(12), out _))
+                    {
+                        loaded++;
+                        continue;
+                    }
+
+                    var spec = SpecName(job);
+                    var points = await Curve(access, encounter, spec, partySize);
+                    if (points == null || points.Count == 0)
+                        continue;
+
+                    table.Upsert(new RankingTable.Entry
+                    {
+                        ZoneName = zone.Trim(),
+                        Boss = boss.Trim(),
+                        JobId = job,
+                        FetchedAt = DateTimeOffset.UtcNow,
+                        Points = points,
+                    });
+                    loaded++;
+                }
+
+                if (!string.IsNullOrWhiteSpace(cachePath))
+                    table.Save(cachePath);
+
+                attemptKey = key;
+                retryAfter = loaded > 0 ? DateTimeOffset.UtcNow.AddHours(12) : DateTimeOffset.UtcNow.AddMinutes(2);
+                SetStatus(loaded > 0
+                    ? "Parse curve loaded for " + boss.Trim() + "."
+                    : "FF Logs returned no ranking curve for " + boss.Trim() + ".");
+            }
+            catch (Exception ex)
+            {
+                attemptKey = key;
+                retryAfter = DateTimeOffset.UtcNow.AddMinutes(2);
+                SetStatus(ex.Message);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref fetching, 0);
+            }
+        }
+
+        private async Task<string> Token(string clientId, string clientSecret)
+        {
+            if (token.Length > 0 && DateTimeOffset.UtcNow < tokenUntil)
+                return token;
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://www.fflogs.com/oauth/token");
+            var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes(clientId + ":" + clientSecret));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+            request.Content = new StringContent("grant_type=client_credentials", Encoding.UTF8, "application/x-www-form-urlencoded");
+            using var response = await Http.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException("FF Logs rejected the API client. Check the id and secret on the Logs tab.");
+
+            using var json = JsonDocument.Parse(body);
+            if (!json.RootElement.TryGetProperty("access_token", out var access))
+                throw new InvalidOperationException("FF Logs did not return an access token.");
+
+            token = access.GetString() ?? "";
+            var seconds = 3600;
+            if (json.RootElement.TryGetProperty("expires_in", out var expires) && expires.TryGetInt32(out var parsed) && parsed > 120)
+                seconds = parsed;
+
+            tokenUntil = DateTimeOffset.UtcNow.AddSeconds(seconds - 60);
+            return token;
+        }
+
+        private async Task<int> FindEncounter(string access, string zoneName, string bossName)
+        {
+            if (zones.Count == 0)
+                await LoadZones(access);
+
+            ZoneInfo? bestZone = null;
+            var bestScore = 0;
+            var encounterId = 0;
+            foreach (var zone in zones)
+            {
+                var zoneScore = Score(zone.Name, zoneName);
+                if (zoneScore == 0)
+                    continue;
+
+                foreach (var encounter in zone.Encounters)
+                {
+                    var bossScore = Score(encounter.Name, bossName);
+                    var total = zoneScore + bossScore;
+                    if (bossScore == 0 || total <= bestScore)
+                        continue;
+
+                    bestScore = total;
+                    bestZone = zone;
+                    encounterId = encounter.Id;
+                }
+            }
+
+            return bestZone == null ? 0 : encounterId;
+        }
+
+        private async Task LoadZones(string access)
+        {
+            const string query = """
+                query {
+                  worldData {
+                    zones {
+                      id
+                      name
+                      encounters { id name }
+                    }
+                  }
+                }
+                """;
+            using var json = await Graph(access, query);
+            if (!json.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("worldData", out var world)
+                || !world.TryGetProperty("zones", out var list))
+                throw new InvalidOperationException("FF Logs did not return its zone list.");
+
+            zones.Clear();
+            foreach (var zone in list.EnumerateArray())
+            {
+                var info = new ZoneInfo
+                {
+                    Id = zone.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
+                    Name = zone.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
+                };
+                if (zone.TryGetProperty("encounters", out var encounters))
+                {
+                    foreach (var encounter in encounters.EnumerateArray())
+                    {
+                        info.Encounters.Add(new EncounterInfo
+                        {
+                            Id = encounter.TryGetProperty("id", out var encounterId) ? encounterId.GetInt32() : 0,
+                            Name = encounter.TryGetProperty("name", out var encounterName) ? encounterName.GetString() ?? "" : "",
+                        });
+                    }
+                }
+
+                zones.Add(info);
+            }
+        }
+
+        private async Task<List<PercentileScale.Point>?> Curve(string access, int encounterId, string spec, int partySize)
+        {
+            var first = await Page(access, encounterId, spec, partySize, 1);
+            if (first.Count == 0)
+                first = await Page(access, encounterId, spec, 0, 1);
+            if (first.Rankings.Count == 0 || first.Count <= 0)
+                return null;
+
+            var amounts = new Dictionary<int, double>();
+            Remember(first, amounts);
+            var pageSize = first.Rankings.Count;
+            if (first.HasMore && pageSize > 0)
+            {
+                var pages = new HashSet<int>();
+                foreach (var mark in Marks)
+                {
+                    var rank = RankFor(mark, first.Count);
+                    var page = ((rank - 1) / pageSize) + 1;
+                    if (page > 1)
+                        pages.Add(page);
+                }
+
+                foreach (var page in pages)
+                    Remember(await Page(access, encounterId, spec, first.UsedSize, page), amounts);
+            }
+
+            var points = new List<PercentileScale.Point> { new(0, 0) };
+            foreach (var mark in Marks)
+            {
+                var rank = RankFor(mark, first.Count);
+                if (!amounts.TryGetValue(rank, out var dps))
+                    continue;
+
+                points.Add(new PercentileScale.Point(mark, dps));
+            }
+
+            points.Sort((left, right) => left.Dps.CompareTo(right.Dps));
+            return points.Count > 1 ? points : null;
+        }
+
+        private static void Remember(RankPage page, Dictionary<int, double> amounts)
+        {
+            for (var i = 0; i < page.Rankings.Count; i++)
+            {
+                var row = page.Rankings[i];
+                var rank = row.Rank > 0 ? row.Rank : ((page.Page - 1) * page.Rankings.Count) + i + 1;
+                amounts[rank] = row.Amount;
+            }
+        }
+
+        private static int RankFor(int percentile, int count)
+        {
+            if (count < 1)
+                return 1;
+            if (percentile >= 100)
+                return 1;
+
+            var rank = (int)Math.Round((100 - percentile) / 100d * count);
+            if (rank < 1)
+                rank = 1;
+            if (rank > count)
+                rank = count;
+
+            return rank;
+        }
+
+        private async Task<RankPage> Page(string access, int encounterId, string spec, int partySize, int page)
+        {
+            var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+            var query = $$"""
+                query {
+                  worldData {
+                    encounter(id: {{encounterId}}) {
+                      characterRankings(specName: "{{spec}}", metric: rdps, page: {{page}}{{sizeArgument}})
+                    }
+                  }
+                }
+                """;
+            JsonDocument json;
+            try
+            {
+                json = await Graph(access, query);
+            }
+            catch (InvalidOperationException) when (partySize > 0)
+            {
+                return await Page(access, encounterId, spec, 0, page);
+            }
+
+            using (json)
+            {
+            var pageData = new RankPage { Page = page, UsedSize = partySize };
+            if (!json.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("worldData", out var world)
+                || !world.TryGetProperty("encounter", out var encounter)
+                || encounter.ValueKind == JsonValueKind.Null
+                || !encounter.TryGetProperty("characterRankings", out var rankings))
+                return pageData;
+
+            if (rankings.ValueKind == JsonValueKind.String)
+            {
+                using var inner = JsonDocument.Parse(rankings.GetString() ?? "{}");
+                ReadRankings(inner.RootElement, pageData);
+            }
+            else
+            {
+                ReadRankings(rankings, pageData);
+            }
+
+            if (pageData.Rankings.Count == 0 && partySize > 0)
+                return await Page(access, encounterId, spec, 0, page);
+
+            return pageData;
+            }
+        }
+
+        private static void ReadRankings(JsonElement rankings, RankPage page)
+        {
+            if (rankings.ValueKind != JsonValueKind.Object)
+                return;
+
+            if (rankings.TryGetProperty("count", out var count) && count.TryGetInt32(out var total))
+                page.Count = total;
+            if (rankings.TryGetProperty("hasMorePages", out var more))
+                page.HasMore = more.ValueKind == JsonValueKind.True;
+            if (rankings.TryGetProperty("page", out var pageNumber) && pageNumber.TryGetInt32(out var parsedPage) && parsedPage > 0)
+                page.Page = parsedPage;
+            if (!rankings.TryGetProperty("rankings", out var rows) || rows.ValueKind != JsonValueKind.Array)
+                return;
+
+            foreach (var row in rows.EnumerateArray())
+            {
+                var amount = 0d;
+                if (row.TryGetProperty("amount", out var amountValue))
+                    amount = ReadDouble(amountValue);
+                else if (row.TryGetProperty("total", out var totalValue))
+                    amount = ReadDouble(totalValue);
+
+                var rank = 0;
+                if (row.TryGetProperty("rank", out var rankValue) && rankValue.TryGetInt32(out var parsedRank))
+                    rank = parsedRank;
+
+                page.Rankings.Add(new RankRow { Rank = rank, Amount = amount });
+            }
+
+            if (page.Count <= 0)
+                page.Count = page.Rankings.Count;
+            if (page.Count > page.Rankings.Count)
+                page.HasMore = true;
+        }
+
+        private static double ReadDouble(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetDouble(out var value))
+                return value;
+
+            return element.ValueKind == JsonValueKind.String
+                && double.TryParse(element.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : 0;
+        }
+
+        private static async Task<JsonDocument> Graph(string access, string query)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://www.fflogs.com/api/v2/client");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
+            var payload = JsonSerializer.Serialize(new Dictionary<string, string> { ["query"] = query });
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var response = await Http.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException("FF Logs rankings could not be loaded.");
+
+            var json = JsonDocument.Parse(body);
+            if (json.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array && errors.GetArrayLength() > 0)
+            {
+                var message = "FF Logs rankings could not be loaded.";
+                var first = errors[0];
+                if (first.TryGetProperty("message", out var text))
+                    message = text.GetString() ?? message;
+
+                json.Dispose();
+                throw new InvalidOperationException(message);
+            }
+
+            return json;
+        }
+
+        private static int Score(string candidate, string wanted)
+        {
+            if (string.Equals(candidate.Trim(), wanted.Trim(), StringComparison.OrdinalIgnoreCase))
+                return 4;
+
+            var left = Letters(candidate);
+            var right = Letters(wanted);
+            if (left.Length < 6 || right.Length < 6)
+                return 0;
+            if (left == right)
+                return 4;
+            if (left.Contains(right, StringComparison.Ordinal) || right.Contains(left, StringComparison.Ordinal))
+                return 2;
+
+            return 0;
+        }
+
+        private static string Letters(string text)
+        {
+            var buffer = new char[text.Length];
+            var count = 0;
+            foreach (var character in text)
+            {
+                if (char.IsLetterOrDigit(character))
+                    buffer[count++] = char.ToLowerInvariant(character);
+            }
+
+            return new string(buffer, 0, count);
+        }
+
+        public static string SpecName(int jobId)
+        {
+            return jobId switch
+            {
+                19 => "Paladin",
+                21 => "Warrior",
+                32 => "DarkKnight",
+                37 => "Gunbreaker",
+                24 => "WhiteMage",
+                28 => "Scholar",
+                33 => "Astrologian",
+                40 => "Sage",
+                20 => "Monk",
+                22 => "Dragoon",
+                30 => "Ninja",
+                34 => "Samurai",
+                39 => "Reaper",
+                41 => "Viper",
+                23 => "Bard",
+                31 => "Machinist",
+                38 => "Dancer",
+                25 => "BlackMage",
+                27 => "Summoner",
+                35 => "RedMage",
+                42 => "Pictomancer",
+                36 => "BlueMage",
+                _ => "",
+            };
+        }
+
+        private void SetStatus(string message)
+        {
+            lock (gate)
+                status = message;
+        }
+
+        private sealed class ZoneInfo
+        {
+            public int Id;
+            public string Name = "";
+            public List<EncounterInfo> Encounters = new();
+        }
+
+        private sealed class EncounterInfo
+        {
+            public int Id;
+            public string Name = "";
+        }
+
+        private sealed class RankPage
+        {
+            public int Page = 1;
+            public int Count;
+            public int UsedSize;
+            public bool HasMore;
+            public List<RankRow> Rankings = new();
+        }
+
+        private sealed class RankRow
+        {
+            public int Rank;
+            public double Amount;
+        }
+    }
+}

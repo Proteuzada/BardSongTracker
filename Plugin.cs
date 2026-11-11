@@ -8,6 +8,7 @@ using Dalamud.Interface.Windowing;
 using BardSongTracker.Parse;
 using BardSongTracker.Windows;
 using System;
+using System.IO;
 
 namespace BardSongTracker
 {
@@ -32,6 +33,7 @@ namespace BardSongTracker
         private OverlayWindow OverlayWindow { get; init; }
         private ParseOverlayWindow ParseOverlay { get; init; }
         private ActLogFollower ActLog { get; init; }
+        private RankingClient Rankings { get; init; }
 
         private SongTracker SongTracker { get; init; }
         private DotTracker DotTracker { get; init; }
@@ -69,6 +71,8 @@ namespace BardSongTracker
 
             ActLog = new ActLogFollower();
             ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds, Configuration.ActLogDirectory);
+            Rankings = new RankingClient(Path.Combine(PluginInterface.ConfigDirectory.FullName, "rankings-cache.json"));
+            ActLog.SetRankings(Rankings.Table);
 
             ConfigWindow = new ConfigWindow(
                 Configuration,
@@ -76,7 +80,8 @@ namespace BardSongTracker
                 DotTracker,
                 SoundAlert,
                 CurrentJobId,
-                ApplyParseSettings);
+                ApplyParseSettings,
+                () => Rankings.Status);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
             ParseOverlay = new ParseOverlayWindow(Configuration, ActLog, TextureProvider);
 
@@ -97,6 +102,12 @@ namespace BardSongTracker
             PluginLog.Info("BardSongTracker loaded successfully!");
         }
 
+        private void RefreshRankings()
+        {
+            var snap = ActLog.Snapshot(Configuration.KeepLastPull);
+            Rankings.Consider(snap, Configuration.FflogsClientId, Configuration.FflogsClientSecret);
+        }
+
         private void ApplyParseSettings()
         {
             ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds, Configuration.ActLogDirectory);
@@ -112,6 +123,7 @@ namespace BardSongTracker
         {
             try
             {
+                RefreshRankings();
                 var localPlayer = ObjectTable.LocalPlayer;
                 if (localPlayer == null)
                 {

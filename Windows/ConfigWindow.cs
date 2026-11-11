@@ -19,12 +19,16 @@ namespace BardSongTracker.Windows
         private readonly SoundAlert soundAlert;
         private readonly Func<uint?> currentJobId;
         private readonly Action? onParseSettingsChanged;
+        private readonly Func<string>? rankingStatus;
 
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
         private string search = string.Empty;
         private string logFolder = string.Empty;
         private bool logFolderReady;
+        private string fflogsClientId = string.Empty;
+        private string fflogsClientSecret = string.Empty;
+        private bool fflogsReady;
         private bool hideJobsWithoutDots;
 
         public ConfigWindow(
@@ -33,9 +37,10 @@ namespace BardSongTracker.Windows
             DotTracker dotTracker,
             SoundAlert soundAlert,
             Func<uint?> currentJobId,
-            Action? onParseSettingsChanged = null) : base("Bard Song Tracker")
+            Action? onParseSettingsChanged = null,
+            Func<string>? rankingStatus = null) : base("Bard Song Tracker")
         {
-            this.Size = new Vector2(920, 700);
+            this.Size = new Vector2(920, 760);
             this.SizeCondition = ImGuiCond.FirstUseEver;
             this.SizeConstraints = new WindowSizeConstraints
             {
@@ -49,6 +54,7 @@ namespace BardSongTracker.Windows
             this.soundAlert = soundAlert;
             this.currentJobId = currentJobId;
             this.onParseSettingsChanged = onParseSettingsChanged;
+            this.rankingStatus = rankingStatus;
         }
 
         public void Dispose() { }
@@ -612,7 +618,7 @@ namespace BardSongTracker.Windows
                 logFolderReady = true;
             }
 
-            BeginPanel("bst-card-logs", new Vector2(0f, 280f));
+            BeginPanel("bst-card-logs", new Vector2(0f, 520f));
             PanelTitle("ACT logs");
             ImGui.TextWrapped("The meter reads the newest Network log. Leave the folder empty to use the usual ACT or IINACT folder, or choose the folder that contains Network_*.log.");
             ImGui.Spacing();
@@ -654,7 +660,43 @@ namespace BardSongTracker.Windows
 
             ImGui.Spacing();
             DrawLogStatus();
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("FF Logs API client");
+            ImGui.TextWrapped("The parse is the site's percentile for this boss and job. Create a client at fflogs.com/api/clients and paste the id and secret. They stay in your plugin config on this PC.");
+            if (!fflogsReady)
+            {
+                fflogsClientId = configuration.FflogsClientId ?? "";
+                fflogsClientSecret = configuration.FflogsClientSecret ?? "";
+                fflogsReady = true;
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Client ID");
+            ImGui.SetNextItemWidth(-1f);
+            ImGui.InputText("##fflogs-id", ref fflogsClientId, 120);
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                SaveFflogs();
+
+            ImGui.Text("Client secret");
+            ImGui.SetNextItemWidth(-1f);
+            ImGui.InputText("##fflogs-secret", ref fflogsClientSecret, 200, ImGuiInputTextFlags.Password);
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                SaveFflogs();
+
+            var ranking = rankingStatus?.Invoke();
+            if (!string.IsNullOrWhiteSpace(ranking))
+                ImGui.TextWrapped(ranking);
+
             EndPanel();
+        }
+
+        private void SaveFflogs()
+        {
+            configuration.FflogsClientId = fflogsClientId.Trim();
+            configuration.FflogsClientSecret = fflogsClientSecret.Trim();
+            configuration.Save();
         }
 
         private void DrawLogStatus()

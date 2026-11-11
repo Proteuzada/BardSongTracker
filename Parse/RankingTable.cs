@@ -50,37 +50,161 @@ namespace BardSongTracker.Parse
             return table;
         }
 
-        public bool TryMatch(string zoneId, string zoneName, int jobId, out Entry entry)
+        public void Save(string path)
         {
-            Entry? byName = null;
-            foreach (var candidate in entries)
+            var model = new FileModel { Encounters = new List<EncounterModel>() };
+            lock (entries)
             {
-                if (candidate.JobId != 0 && candidate.JobId != jobId)
-                    continue;
-
-                if (candidate.ZoneId != 0 && candidate.ZoneId == ParseZoneId(zoneId))
+                foreach (var entry in entries)
                 {
-                    entry = candidate;
-                    return true;
-                }
+                    var points = new List<PointModel>();
+                    foreach (var point in entry.Points)
+                    {
+                        points.Add(new PointModel
+                        {
+                            Percentile = point.Percentile,
+                            Dps = point.Dps,
+                        });
+                    }
 
-                if (byName == null
-                    && candidate.ZoneName.Length > 0
-                    && zoneName.Length > 0
-                    && string.Equals(candidate.ZoneName, zoneName, StringComparison.OrdinalIgnoreCase))
-                {
-                    byName = candidate;
+                    model.Encounters.Add(new EncounterModel
+                    {
+                        ZoneName = entry.ZoneName,
+                        Boss = entry.Boss,
+                        JobId = entry.JobId,
+                        FetchedAt = entry.FetchedAt,
+                        Percentiles = points,
+                    });
                 }
             }
 
-            if (byName != null)
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(path, JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        public void Replace(List<Entry> next)
+        {
+            lock (entries)
+                entries.Clear();
+
+            if (next == null)
+                return;
+
+            lock (entries)
+                entries.AddRange(next);
+        }
+
+        public void Upsert(Entry entry)
+        {
+            if (entry == null)
+                return;
+
+            lock (entries)
             {
-                entry = byName;
-                return true;
+                for (var i = 0; i < entries.Count; i++)
+                {
+                    var current = entries[i];
+                    if (current.JobId == entry.JobId
+                        && string.Equals(current.ZoneName, entry.ZoneName, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(current.Boss, entry.Boss, StringComparison.OrdinalIgnoreCase))
+                    {
+                        entries[i] = entry;
+                        return;
+                    }
+                }
+
+                entries.Add(entry);
+            }
+        }
+
+        public bool TryFresh(string zoneName, string bossName, int jobId, TimeSpan maxAge, out Entry entry)
+        {
+            if (!TryMatch("", zoneName, bossName, jobId, out entry))
+                return false;
+
+            return entry.FetchedAt > DateTimeOffset.MinValue && DateTimeOffset.UtcNow - entry.FetchedAt <= maxAge;
+        }
+
+        public bool TryMatch(string zoneId, string zoneName, string bossName, int jobId, out Entry entry)
+        {
+            Entry? best = null;
+            var bestScore = 0;
+            lock (entries)
+            {
+                foreach (var candidate in entries)
+                {
+                    if (candidate.JobId != 0 && candidate.JobId != jobId)
+                        continue;
+                    if (candidate.Points.Count == 0)
+                        continue;
+
+                    var score = 0;
+                    if (candidate.ZoneId != 0 && candidate.ZoneId == ParseZoneId(zoneId))
+                        score += 4;
+                    else if (Same(candidate.ZoneName, zoneName))
+                        score += 4;
+                    else if (Overlaps(candidate.ZoneName, zoneName))
+                        score += 2;
+                    else if (candidate.ZoneName.Length > 0 || candidate.ZoneId != 0)
+                        continue;
+
+                    if (candidate.Boss.Length > 0)
+                    {
+                        if (Same(candidate.Boss, bossName))
+                            score += 4;
+                        else if (Overlaps(candidate.Boss, bossName))
+                            score += 2;
+                        else
+                            continue;
+                    }
+                    else if (bossName.Length > 0)
+                    {
+                        continue;
+                    }
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = candidate;
+                    }
+                }
             }
 
-            entry = null!;
-            return false;
+            entry = best!;
+            return best != null;
+        }
+
+        private static bool Same(string left, string right)
+        {
+            return left.Length > 0
+                && right.Length > 0
+                && string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool Overlaps(string left, string right)
+        {
+            var a = Letters(left);
+            var b = Letters(right);
+            if (a.Length < 6 || b.Length < 6)
+                return false;
+
+            return a.Contains(b, StringComparison.Ordinal) || b.Contains(a, StringComparison.Ordinal);
+        }
+
+        private static string Letters(string text)
+        {
+            var buffer = new char[text.Length];
+            var count = 0;
+            foreach (var character in text)
+            {
+                if (char.IsLetterOrDigit(character))
+                    buffer[count++] = char.ToLowerInvariant(character);
+            }
+
+            return new string(buffer, 0, count);
         }
 
         public static int ParseZoneId(string text)
@@ -101,7 +225,9 @@ namespace BardSongTracker.Parse
         {
             public int ZoneId { get; init; }
             public string ZoneName { get; init; } = "";
+            public string Boss { get; init; } = "";
             public int JobId { get; init; }
+            public DateTimeOffset FetchedAt { get; init; }
             public List<PercentileScale.Point> Points { get; init; } = new();
 
             public static Entry From(EncounterModel model)
@@ -118,7 +244,9 @@ namespace BardSongTracker.Parse
                 {
                     ZoneId = ParseZoneId(model.ZoneId ?? ""),
                     ZoneName = model.ZoneName?.Trim() ?? "",
+                    Boss = model.Boss?.Trim() ?? model.Encounter?.Trim() ?? "",
                     JobId = model.JobId != 0 ? model.JobId : JobIdFromName(model.Job),
+                    FetchedAt = model.FetchedAt,
                     Points = points,
                 };
             }
@@ -153,8 +281,11 @@ namespace BardSongTracker.Parse
         {
             public string? ZoneId { get; set; }
             public string? ZoneName { get; set; }
+            public string? Boss { get; set; }
+            public string? Encounter { get; set; }
             public string? Job { get; set; }
             public int JobId { get; set; }
+            public DateTimeOffset FetchedAt { get; set; }
             public List<PointModel>? Percentiles { get; set; }
         }
 

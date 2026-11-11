@@ -35,6 +35,12 @@ namespace BardSongTracker.Parse
                 EnsureStarted();
         }
 
+        public void SetRankings(RankingTable table)
+        {
+            lock (gate)
+                meter.UseRankings(table);
+        }
+
         public ParseSnapshot Snapshot(bool keepLastPull)
         {
             lock (gate)
