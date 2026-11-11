@@ -192,15 +192,15 @@ namespace BardSongTracker.Parse
             if (zones.Count == 0)
                 await LoadZones(access);
 
+            foreach (var zone in zones)
+            {
+                if (zone.Encounters.Count == 0 && zone.Id != 0 && NeedsEncounters(zone.Name, zoneName))
+                    await LoadEncounters(access, zone);
+            }
+
             var matched = new List<EncounterMatch.ZoneNames>();
             foreach (var zone in zones)
             {
-                if (EncounterMatch.Score(zone.Name, zoneName) == 0)
-                    continue;
-
-                if (zone.Encounters.Count == 0 && zone.Id != 0)
-                    await LoadEncounters(access, zone);
-
                 var names = new EncounterMatch.ZoneNames { Name = zone.Name };
                 foreach (var encounter in zone.Encounters)
                     names.Encounters.Add(new EncounterMatch.EncounterName(encounter.Id, encounter.Name));
@@ -210,8 +210,40 @@ namespace BardSongTracker.Parse
             return EncounterMatch.Pick(zoneName, bossName, matched);
         }
 
+        private static bool NeedsEncounters(string zone, string duty)
+        {
+            if (EncounterMatch.Score(zone, duty) >= 3)
+                return true;
+
+            return zone.Contains("Ultimate", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Trial", StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task LoadZones(string access)
         {
+            const string expansions = """
+                query {
+                  worldData {
+                    expansions {
+                      zones {
+                        id
+                        name
+                        encounters { id name }
+                      }
+                    }
+                  }
+                }
+                """;
+            try
+            {
+                using var json = await Graph(access, expansions);
+                if (ReadExpansions(json))
+                    return;
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
             const string query = """
                 query {
                   worldData {
@@ -223,13 +255,38 @@ namespace BardSongTracker.Parse
                   }
                 }
                 """;
-            using var json = await Graph(access, query);
-            if (!json.RootElement.TryGetProperty("data", out var data)
+            using var flat = await Graph(access, query);
+            if (!flat.RootElement.TryGetProperty("data", out var data)
                 || !data.TryGetProperty("worldData", out var world)
                 || !world.TryGetProperty("zones", out var list))
                 throw new InvalidOperationException("FF Logs did not return its zone list.");
 
             zones.Clear();
+            ReadZoneArray(list);
+            if (zones.Count == 0)
+                throw new InvalidOperationException("FF Logs did not return its zone list.");
+        }
+
+        private bool ReadExpansions(JsonDocument json)
+        {
+            if (!json.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("worldData", out var world)
+                || !world.TryGetProperty("expansions", out var expansions)
+                || expansions.ValueKind != JsonValueKind.Array)
+                return false;
+
+            zones.Clear();
+            foreach (var expansion in expansions.EnumerateArray())
+            {
+                if (expansion.TryGetProperty("zones", out var list) && list.ValueKind == JsonValueKind.Array)
+                    ReadZoneArray(list);
+            }
+
+            return zones.Count > 0;
+        }
+
+        private void ReadZoneArray(JsonElement list)
+        {
             foreach (var zone in list.EnumerateArray())
             {
                 var info = new ZoneInfo
