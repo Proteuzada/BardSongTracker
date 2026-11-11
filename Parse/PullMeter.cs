@@ -15,7 +15,9 @@ namespace BardSongTracker.Parse
         private readonly HashSet<string> killedEnemies = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> aggroDropped = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> hpRestored = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> vanished = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> enemyMaxHp = new(StringComparer.OrdinalIgnoreCase);
+        private bool playerDied;
         private string playerId = "";
         private string zoneName = "";
         private bool inPull;
@@ -45,6 +47,12 @@ namespace BardSongTracker.Parse
                 case "03":
                     ApplyCombatant(fields);
                     break;
+                case "04":
+                    ApplyRemove(fields);
+                    break;
+                case "12":
+                    ApplyLocalJob(fields);
+                    break;
                 case "21":
                 case "22":
                     ApplyAbility(fields, clock);
@@ -55,11 +63,45 @@ namespace BardSongTracker.Parse
                 case "33":
                     ApplyDirector(fields);
                     break;
+                case "34":
+                    ApplyNameToggle(fields);
+                    break;
                 case "260":
                     ApplyCombatState(fields);
                     break;
                 case "261":
+                    RememberJob(fields);
                     ApplyCombatantMemory(fields);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Learns names and jobs from lines already in the log, without counting damage.
+        /// </summary>
+        public void Remember(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+                return;
+
+            var split = line.IndexOf('|');
+            if (split < 2 || split > 3)
+                return;
+
+            var fields = line.Split('|');
+            switch (line[..split])
+            {
+                case "02":
+                    ApplyPlayer(fields);
+                    break;
+                case "03":
+                    ApplyCombatant(fields);
+                    break;
+                case "12":
+                    ApplyLocalJob(fields);
+                    break;
+                case "261":
+                    RememberJob(fields);
                     break;
             }
         }
@@ -171,6 +213,37 @@ namespace BardSongTracker.Parse
 
             if (int.TryParse(fields[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var job) && job > 0)
                 actor.JobId = job;
+
+            vanished.Remove(fields[2]);
+        }
+
+        private void ApplyLocalJob(string[] fields)
+        {
+            if (fields.Length < 3 || playerId.Length == 0)
+                return;
+
+            var job = ParseJob(fields[2]);
+            if (job is > 0)
+                GetOrAdd(playerId).JobId = job.Value;
+        }
+
+        private void ApplyRemove(string[] fields)
+        {
+            if (fields.Length < 3 || !IsEnemy(fields[2]))
+                return;
+
+            MarkVanished(fields[2]);
+        }
+
+        private void ApplyNameToggle(string[] fields)
+        {
+            if (fields.Length < 7 || !IsEnemy(fields[2]))
+                return;
+
+            if (fields[6] == "0" || fields[6] == "00")
+                MarkVanished(fields[2]);
+            else
+                vanished.Remove(fields[2]);
         }
 
         private void ApplyAbility(string[] fields, DateTimeOffset clock)
@@ -220,10 +293,13 @@ namespace BardSongTracker.Parse
 
             if (!inPull)
             {
-                ClearDamage();
-                ClearEncounter();
+                if (!HasDamage())
+                {
+                    ClearEncounter();
+                    pullStart = when;
+                }
+
                 inPull = true;
-                pullStart = when;
                 lockedDuration = TimeSpan.Zero;
             }
 
@@ -239,10 +315,13 @@ namespace BardSongTracker.Parse
 
         private void ApplyDeath(string[] fields)
         {
-            if (fields.Length < 3 || !IsEnemy(fields[2]))
+            if (fields.Length < 3)
                 return;
 
-            killedEnemies.Add(fields[2]);
+            if (IsPlayer(fields[2]))
+                playerDied = true;
+            else if (IsEnemy(fields[2]))
+                killedEnemies.Add(fields[2]);
         }
 
         private void ApplyDirector(string[] fields)
@@ -258,7 +337,7 @@ namespace BardSongTracker.Parse
             if (fields.Length < 6 || fields[2] != "0" || fields[3] != "0" || fields[5] != "1")
                 return;
 
-            if (!HasDamage() || killedEnemies.Count > 0)
+            if (!HasDamage() || killedEnemies.Count > 0 || vanished.Count > 0 || !LivingEnemiesReset())
                 return;
 
             ResetPull();
@@ -273,6 +352,7 @@ namespace BardSongTracker.Parse
             long? currentHp = null;
             long? maxHp = null;
             int? aggression = null;
+            bool? targetable = null;
             for (var i = 4; i + 1 < fields.Length; i += 2)
             {
                 if (fields[i].Equals("CurrentHP", StringComparison.OrdinalIgnoreCase))
@@ -281,11 +361,21 @@ namespace BardSongTracker.Parse
                     maxHp = ParseLong(fields[i + 1]);
                 else if (fields[i].Equals("AggressionStatus", StringComparison.OrdinalIgnoreCase))
                     aggression = ParseInt(fields[i + 1]);
+                else if (fields[i].Equals("IsTargetable", StringComparison.OrdinalIgnoreCase))
+                    targetable = fields[i + 1] != "0" && !fields[i + 1].Equals("false", StringComparison.OrdinalIgnoreCase);
             }
 
             if (maxHp is > 0)
                 enemyMaxHp[id] = maxHp.Value;
 
+            if (targetable == false)
+            {
+                MarkVanished(id);
+                return;
+            }
+
+            if (targetable == true)
+                vanished.Remove(id);
             if (!fields[2].Equals("Change", StringComparison.OrdinalIgnoreCase))
                 return;
             if (!damagedEnemies.Contains(id) || killedEnemies.Contains(id))
@@ -296,9 +386,23 @@ namespace BardSongTracker.Parse
 
             if (currentHp is not null && enemyMaxHp.TryGetValue(id, out var known) && known > 0 && currentHp.Value >= known)
                 hpRestored.Add(id);
+        }
 
-            if (LivingEnemiesReset())
-                ResetPull();
+        private void RememberJob(string[] fields)
+        {
+            if (fields.Length < 6 || !IsPlayer(fields[3]))
+                return;
+
+            for (var i = 4; i + 1 < fields.Length; i += 2)
+            {
+                if (!fields[i].Equals("Job", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var job = ParseJob(fields[i + 1]);
+                if (job is > 0)
+                    GetOrAdd(fields[3]).JobId = job.Value;
+                return;
+            }
         }
 
         private bool LivingEnemiesReset()
@@ -306,15 +410,22 @@ namespace BardSongTracker.Parse
             var anyLiving = false;
             foreach (var id in damagedEnemies)
             {
-                if (killedEnemies.Contains(id))
+                if (killedEnemies.Contains(id) || vanished.Contains(id))
                     continue;
 
                 anyLiving = true;
-                if (!aggroDropped.Contains(id) && !hpRestored.Contains(id))
+                if (!aggroDropped.Contains(id) || !hpRestored.Contains(id))
                     return false;
             }
 
             return anyLiving;
+        }
+
+        private void MarkVanished(string id)
+        {
+            vanished.Add(id);
+            aggroDropped.Remove(id);
+            hpRestored.Remove(id);
         }
 
         private static long? ParseLong(string text)
@@ -327,14 +438,27 @@ namespace BardSongTracker.Parse
             return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
         }
 
-        private static bool IsWipe(string command)
+        private bool IsWipe(string command)
         {
-            return command.Equals("40000005", StringComparison.OrdinalIgnoreCase)
-                || command.Equals("40000006", StringComparison.OrdinalIgnoreCase)
-                || command.Equals("4000000F", StringComparison.OrdinalIgnoreCase)
+            if (command.Equals("40000006", StringComparison.OrdinalIgnoreCase)
                 || command.Equals("40000010", StringComparison.OrdinalIgnoreCase)
-                || command.Equals("40000011", StringComparison.OrdinalIgnoreCase)
-                || command.Equals("40000012", StringComparison.OrdinalIgnoreCase);
+                || command.Equals("40000012", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (!playerDied)
+                return false;
+
+            return command.Equals("40000005", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("4000000F", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("40000011", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int? ParseJob(string text)
+        {
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var job) && job > 0)
+                return job;
+
+            return null;
         }
 
         private static string CreditName(string[] fields, string creditId, string sourceId)
@@ -380,6 +504,8 @@ namespace BardSongTracker.Parse
             killedEnemies.Clear();
             aggroDropped.Clear();
             hpRestored.Clear();
+            vanished.Clear();
+            playerDied = false;
         }
 
         private static bool IsEnemy(string id)

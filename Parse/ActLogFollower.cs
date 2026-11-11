@@ -105,6 +105,7 @@ namespace BardSongTracker.Parse
         {
             SetStatus(file, null);
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            RememberJobs(stream);
             stream.Seek(0, SeekOrigin.End);
             var pending = "";
             var switchedAt = DateTime.UtcNow;
@@ -151,6 +152,78 @@ namespace BardSongTracker.Parse
 
                 Thread.Sleep(100);
             }
+        }
+
+        private void RememberJobs(FileStream stream)
+        {
+            var start = LastZoneOffset(stream);
+            stream.Seek(start, SeekOrigin.Begin);
+            var pending = "";
+            var buffer = new byte[65536];
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                pending += Encoding.UTF8.GetString(buffer, 0, read);
+                var consumed = 0;
+                while (true)
+                {
+                    var newline = pending.IndexOf('\n', consumed);
+                    if (newline < 0)
+                        break;
+
+                    var line = pending[consumed..newline].TrimEnd('\r');
+                    consumed = newline + 1;
+                    if (line.Length > 2 && IsIdentityLine(line))
+                    {
+                        lock (gate)
+                            meter.Remember(line);
+                    }
+                }
+
+                if (consumed > 0)
+                    pending = pending[consumed..];
+            }
+        }
+
+        private static bool IsIdentityLine(string line)
+        {
+            return line.StartsWith("02|", StringComparison.Ordinal)
+                || line.StartsWith("03|", StringComparison.Ordinal)
+                || line.StartsWith("12|", StringComparison.Ordinal)
+                || line.StartsWith("261|", StringComparison.Ordinal);
+        }
+
+        private static long LastZoneOffset(FileStream stream)
+        {
+            var length = stream.Length;
+            const int window = 1024 * 1024;
+            var buffer = new byte[window];
+            var pos = length;
+            while (pos > 0)
+            {
+                var take = (int)Math.Min(window, pos);
+                var start = pos - take;
+                stream.Seek(start, SeekOrigin.Begin);
+                var got = stream.Read(buffer, 0, take);
+                for (var i = got - 3; i >= 1; i--)
+                {
+                    if (buffer[i - 1] != (byte)'\n')
+                        continue;
+                    if (buffer[i] == (byte)'0' && buffer[i + 1] == (byte)'1' && buffer[i + 2] == (byte)'|')
+                        return start + i;
+                }
+
+                if (start == 0)
+                {
+                    if (got >= 3 && buffer[0] == (byte)'0' && buffer[1] == (byte)'1' && buffer[2] == (byte)'|')
+                        return 0;
+                    break;
+                }
+
+                pos = start + 3;
+            }
+
+            return 0;
         }
 
         private bool IsEnabled()

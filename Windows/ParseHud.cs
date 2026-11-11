@@ -1,6 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using BardSongTracker.Parse;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Numerics;
 
@@ -44,9 +45,14 @@ namespace BardSongTracker.Windows
                     return;
                 }
 
-                var top = 0d;
+                var topByRole = new Dictionary<CombatRole, double>();
                 foreach (var row in rows)
-                    top = Math.Max(top, row.Dps);
+                {
+                    var role = FightRole(row.JobId);
+                    topByRole.TryGetValue(role, out var current);
+                    if (row.Dps > current)
+                        topByRole[role] = row.Dps;
+                }
 
                 var y = header + 2f;
                 var shown = 0;
@@ -57,7 +63,8 @@ namespace BardSongTracker.Windows
                     if (shown >= 8 || y + rowH > size.Y + 1f)
                         break;
 
-                    DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, top, nameSize);
+                    var roleTop = topByRole.TryGetValue(FightRole(row.JobId), out var best) ? best : 0d;
+                    DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, roleTop, nameSize);
                     y += rowH;
                     shown++;
                 }
@@ -139,6 +146,23 @@ namespace BardSongTracker.Windows
         private static float ClampScale(float meterScale)
         {
             return Math.Clamp(meterScale, 0.8f, 2.5f);
+        }
+
+        private static CombatRole FightRole(int jobId)
+        {
+            var role = DotCatalog.RoleOf((uint)jobId);
+            if (role != CombatRole.Limited)
+                return role;
+
+            return jobId switch
+            {
+                1 or 3 => CombatRole.Tank,
+                6 => CombatRole.Healer,
+                2 or 4 or 29 => CombatRole.Melee,
+                5 => CombatRole.PhysicalRanged,
+                7 or 26 => CombatRole.Caster,
+                _ => CombatRole.Limited,
+            };
         }
 
         private static string Thousands(double value)
