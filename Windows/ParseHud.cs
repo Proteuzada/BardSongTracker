@@ -172,7 +172,7 @@ namespace BardSongTracker.Windows
         {
             if (heldParse.Count != seenParse.Count)
             {
-                List<string> drop = null;
+                List<string>? drop = null;
                 foreach (var key in heldParse.Keys)
                 {
                     if (!seenParse.Contains(key))
