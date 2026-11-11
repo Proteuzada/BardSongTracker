@@ -30,6 +30,7 @@ namespace BardSongTracker
         public float DotAlertThreshold { get; set; } = 5.0f;
 
         public bool ShowParseOverlay { get; set; } = true;
+        public bool ShowOnlyMyMeter { get; set; } = false;
         public string ActLogDirectory { get; set; } = "";
         public string RankingsPath { get; set; } = "";
         public float PullIdleSeconds { get; set; } = 25f;

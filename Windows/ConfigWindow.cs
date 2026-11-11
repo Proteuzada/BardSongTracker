@@ -123,6 +123,8 @@ namespace BardSongTracker.Windows
                 configuration.ShowParseOverlay = value;
                 onParseSettingsChanged?.Invoke();
             });
+            Checkbox("Show only me", configuration.ShowOnlyMyMeter, value => configuration.ShowOnlyMyMeter = value);
+            ImGui.TextDisabled("Hides the other players. Your rDPS and parse stay on the meter.");
             ImGui.TextDisabled("Drag a corner of the meter to resize it. Damage comes from the usual ACT log folder.");
             ImGui.Spacing();
             var scale = configuration.OverlayScale;

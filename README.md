@@ -4,7 +4,7 @@ Dalamud plugin that tracks Bard songs and damage-over-time effects for tanks, he
 
 The menu has three tabs:
 
-- **General** — overlay, damage meter, volume, and sound test
+- **General** — overlay, damage meter, only-me meter, volume, and sound test
 - **Bard** — thresholds for Mage's Ballad, Army's Paeon, and The Wanderer's Minuet
 - **DoTs** — role and job filters, search, and a toggle for each skill
 
@@ -18,7 +18,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 ## Live parse
 
-The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. The header only names the columns. Each row is a thin strip with that player's rDPS in front of a smaller first name, and their parse beside it. rDPS is shown in thousands, such as 12k or 40k, so the digits stay still. Eight players fit in the meter. The parse is that rDPS compared with the highest rDPS in the pull, so the leader is 100 and everyone else is lower. Pet damage is added to the owner. Drag any corner of the meter to resize it. Show or hide it from the General tab.
+The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. The header only names the columns. Each row is a thin strip with that player's rDPS in front of a smaller first name, and their parse beside it. rDPS is shown in thousands, such as 12k or 40k, so the digits stay still. Eight players fit in the meter. The parse is that rDPS compared with the highest rDPS in the pull, so the leader is 100 and everyone else is lower. Pet damage is added to the owner. Drag any corner of the meter to resize it. Show or hide it from the General tab. Show only me leaves your row and hides the rest. Your parse still compares your rDPS with the highest rDPS in the pull.
 
 ## Install from Dalamud, without compiling
 

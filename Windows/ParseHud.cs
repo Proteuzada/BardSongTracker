@@ -10,7 +10,7 @@ namespace BardSongTracker.Windows
     {
         private static readonly Vector4 Gold = new(0.90f, 0.80f, 0.50f, 1f);
 
-        public static void Draw(ParseSnapshot snap, Vector2 size)
+        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou = false)
         {
             if (size.X < 8f || size.Y < 8f)
                 return;
@@ -42,15 +42,21 @@ namespace BardSongTracker.Windows
                     top = Math.Max(top, row.Dps);
 
                 var y = header + 2f;
-                var limit = Math.Min(rows.Length, 8);
-                for (var i = 0; i < limit; i++)
+                var shown = 0;
+                foreach (var row in rows)
                 {
-                    if (y + rowH > size.Y + 1f)
+                    if (onlyYou && !row.You)
+                        continue;
+                    if (shown >= 8 || y + rowH > size.Y + 1f)
                         break;
 
-                    DrawRow(rows[i], y, size.X, Math.Max(10f, rowH - 2f), dpsCol, parseCol, top, nameSize);
+                    DrawRow(row, y, size.X, Math.Max(10f, rowH - 2f), dpsCol, parseCol, top, nameSize);
                     y += rowH;
+                    shown++;
                 }
+
+                if (shown == 0)
+                    DrawNote(onlyYou ? "Waiting for your damage." : snap.Note, header + 2f, size.X);
             }
             finally
             {

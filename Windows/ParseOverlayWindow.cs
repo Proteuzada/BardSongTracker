@@ -57,7 +57,7 @@ namespace BardSongTracker.Windows
 
         public override void Draw()
         {
-            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail());
+            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail(), configuration.ShowOnlyMyMeter);
         }
     }
 }
