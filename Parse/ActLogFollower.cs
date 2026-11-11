@@ -21,12 +21,12 @@ namespace BardSongTracker.Parse
         private double idleSeconds = 25;
         private bool enabled;
 
-        public void Configure(bool watch, float idle)
+        public void Configure(bool watch, float idle, string? logDirectory)
         {
             lock (gate)
             {
                 enabled = watch;
-                directory = "";
+                directory = logDirectory?.Trim().Trim('"') ?? "";
                 idleSeconds = idle < 5 ? 25 : idle;
                 error = null;
             }
@@ -84,9 +84,9 @@ namespace BardSongTracker.Parse
                     var file = NewestLog();
                     if (file == null)
                     {
-                        SetStatus(null, ResolveDirectory() == null
-                            ? "ACT log folder not found."
-                            : "No Network_*.log in the ACT folder.");
+                    SetStatus(null, ResolveDirectory() == null
+                        ? "ACT log folder not found. Choose it in the Logs tab."
+                        : "No Network_*.log in the selected folder.");
                         Thread.Sleep(1000);
                         continue;
                     }
@@ -109,9 +109,13 @@ namespace BardSongTracker.Parse
             stream.Seek(0, SeekOrigin.End);
             var pending = "";
             var switchedAt = DateTime.UtcNow;
+            var folder = ResolveDirectory();
 
             while (!token.IsCancellationRequested && IsEnabled())
             {
+                if (!string.Equals(ResolveDirectory(), folder, StringComparison.OrdinalIgnoreCase))
+                    return;
+
                 var buffer = new byte[16384];
                 var read = stream.Read(buffer, 0, buffer.Length);
                 if (read > 0)
@@ -259,23 +263,7 @@ namespace BardSongTracker.Parse
             lock (gate)
                 configured = directory;
 
-            if (!string.IsNullOrWhiteSpace(configured))
-                return Directory.Exists(configured) ? configured : null;
-
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            var candidates = new[]
-            {
-                Path.Combine(appData, "Advanced Combat Tracker", "FFXIVLogs"),
-                Path.Combine(documents, "Advanced Combat Tracker", "FFXIVLogs"),
-            };
-            foreach (var candidate in candidates)
-            {
-                if (Directory.Exists(candidate))
-                    return candidate;
-            }
-
-            return null;
+            return ActLogPaths.Resolve(configured);
         }
 
         private void SetStatus(string? file, string? message)

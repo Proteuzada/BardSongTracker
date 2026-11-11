@@ -65,7 +65,7 @@ namespace BardSongTracker
             SoundAlert.SetSound(Configuration.AlertSoundId);
 
             ActLog = new ActLogFollower();
-            ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds);
+            ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds, Configuration.ActLogDirectory);
 
             ConfigWindow = new ConfigWindow(
                 Configuration,
@@ -96,7 +96,7 @@ namespace BardSongTracker
 
         private void ApplyParseSettings()
         {
-            ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds);
+            ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds, Configuration.ActLogDirectory);
         }
 
         private uint? CurrentJobId()

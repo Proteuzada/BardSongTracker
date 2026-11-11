@@ -1,8 +1,10 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.JobGauge.Enums;
+using BardSongTracker.Parse;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Numerics;
 
 namespace BardSongTracker.Windows
@@ -21,6 +23,8 @@ namespace BardSongTracker.Windows
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
         private string search = string.Empty;
+        private string logFolder = string.Empty;
+        private bool logFolderReady;
         private bool hideJobsWithoutDots;
 
         public ConfigWindow(
@@ -61,6 +65,13 @@ namespace BardSongTracker.Windows
             {
                 ImGui.Spacing();
                 DrawGeneral();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Logs"))
+            {
+                ImGui.Spacing();
+                DrawLogs();
                 ImGui.EndTabItem();
             }
 
@@ -125,7 +136,7 @@ namespace BardSongTracker.Windows
             });
             Checkbox("Show only me", configuration.ShowOnlyMyMeter, value => configuration.ShowOnlyMyMeter = value);
             ImGui.TextDisabled("Hides the other players. Your rDPS and parse stay on the meter.");
-            ImGui.TextDisabled("Drag a corner of the meter to resize the window. Damage comes from the usual ACT log folder.");
+            ImGui.TextDisabled("Drag a corner of the meter to resize the window. Choose the ACT log folder in the Logs tab.");
             ImGui.Spacing();
             var meterScale = configuration.MeterScale;
             LabeledSlider("Meter scale", "##meter-scale", ref meterScale, 0.8f, 2.5f, "%.1f", value =>
@@ -546,6 +557,93 @@ namespace BardSongTracker.Windows
             }
 
             return string.Join(", ", labels);
+        }
+
+        private void DrawLogs()
+        {
+            if (!logFolderReady)
+            {
+                logFolder = configuration.ActLogDirectory ?? "";
+                logFolderReady = true;
+            }
+
+            BeginPanel("bst-card-logs", new Vector2(0f, 280f));
+            PanelTitle("ACT logs");
+            ImGui.TextWrapped("The meter reads the newest Network log. Leave the folder empty to use the usual ACT or IINACT folder, or choose the folder that contains Network_*.log.");
+            ImGui.Spacing();
+            ImGui.Text("Log folder");
+            ImGui.SetNextItemWidth(-1f);
+            ImGui.InputText("##log-folder", ref logFolder, 260);
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                SaveLogFolder(logFolder);
+
+            if (ImGui.Button("Browse"))
+            {
+                try
+                {
+                    var picked = FolderPicker.Show(ActLogPaths.Resolve(logFolder) ?? logFolder);
+                    if (!string.IsNullOrWhiteSpace(picked))
+                    {
+                        logFolder = picked;
+                        SaveLogFolder(picked);
+                    }
+                }
+                catch (Exception)
+                {
+                    ImGui.OpenPopup("bst-log-picker-failed");
+                }
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Use default"))
+            {
+                logFolder = "";
+                SaveLogFolder("");
+            }
+
+            if (ImGui.BeginPopup("bst-log-picker-failed"))
+            {
+                ImGui.Text("The folder picker could not open. Paste the path above.");
+                ImGui.EndPopup();
+            }
+
+            ImGui.Spacing();
+            DrawLogStatus();
+            EndPanel();
+        }
+
+        private void DrawLogStatus()
+        {
+            var resolved = ActLogPaths.Resolve(configuration.ActLogDirectory);
+            if (resolved == null)
+            {
+                ImGui.TextColored(new Vector4(1f, 0.55f, 0.45f, 1f), "Folder not found. Pick the folder that contains the Network logs.");
+                return;
+            }
+
+            var count = 0;
+            try
+            {
+                count = Directory.GetFiles(resolved, "Network_*.log").Length;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            if (count == 0)
+                ImGui.TextColored(new Vector4(1f, 0.78f, 0.45f, 1f), $"Using {resolved}. No Network logs there yet.");
+            else
+                ImGui.TextDisabled($"Using {resolved}. {count} network log{(count == 1 ? "" : "s")}.");
+        }
+
+        private void SaveLogFolder(string path)
+        {
+            configuration.ActLogDirectory = path.Trim().Trim('"');
+            configuration.Save();
+            onParseSettingsChanged?.Invoke();
         }
 
         private void Checkbox(string label, bool current, Action<bool> assign)
