@@ -71,7 +71,14 @@ namespace BardSongTracker
                 Configuration.RankingsPath,
                 Configuration.PullIdleSeconds);
 
-            ConfigWindow = new ConfigWindow(Configuration, SongTracker, DotTracker, SoundAlert, CurrentJobId, ApplyParseSettings);
+            ConfigWindow = new ConfigWindow(
+                Configuration,
+                SongTracker,
+                DotTracker,
+                SoundAlert,
+                CurrentJobId,
+                ApplyParseSettings,
+                () => ActLog.Snapshot());
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
             ParseOverlay = new ParseOverlayWindow(Configuration, ActLog);
 

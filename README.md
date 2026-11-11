@@ -19,7 +19,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 ## Live parse
 
-The Parse overlay tails the newest `Network_*.log` from Advanced Combat Tracker. That is the log FFLogs reads. Damage amounts are decoded from the ACT effect pairs, summed for your character and your pets, and divided by the length of the pull.
+The Parse overlay tails the newest `Network_*.log` while Advanced Combat Tracker is open and logging. It does not read the DPS number printed in the ACT window. Damage amounts are decoded from the log, summed for your character and your pets, and divided by the length of the pull. The HUD shows your name, damage, pDPS, and time on the left, and the percentile on the right.
 
 FFLogs does not keep a rank for every score. It caches the DPS at fixed percentiles and places a new score by linear interpolation between the two nearest values. A score halfway between the 95% and 99% marks is a 97, and the shown percent is rounded down. The overlay does that interpolation against the JSON file set in the Parse tab.
 
