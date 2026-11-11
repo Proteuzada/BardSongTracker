@@ -7,41 +7,39 @@ namespace BardSongTracker.Windows
 {
     public static class ParseHud
     {
+        private static readonly Vector4 Gold = new(0.90f, 0.80f, 0.50f, 1f);
+
         public static void Draw(ParseSnapshot snap, Vector2 size)
         {
             if (size.X < 8f || size.Y < 8f)
                 return;
 
             var rows = snap.Rows ?? Array.Empty<MeterRow>();
-            var header = Math.Clamp(size.Y * 0.16f, 16f, 28f);
-            var body = Math.Max(8f, size.Y - header);
+            var header = Math.Clamp(size.Y * 0.22f, 34f, 58f);
+            var body = Math.Max(8f, size.Y - header - 4f);
             var rowCount = Math.Max(rows.Length, 1);
-            var rowH = Math.Clamp(body / rowCount, 16f, 40f);
-            var fontSize = Math.Clamp(rowH * 0.46f, 11f, 22f);
+            var rowH = Math.Clamp(body / rowCount, 22f, 46f);
+            var fontSize = Math.Clamp(rowH * 0.42f, 12f, 20f);
             var baseSize = ImGui.GetFontSize();
             var scale = baseSize <= 0f ? 1f : fontSize / baseSize;
 
             ImGui.SetWindowFontScale(scale);
             try
             {
-                DrawHeader(snap, size.X, header);
+                DrawHeader(YourDps(rows), size.X, header, fontSize);
                 if (rows.Length == 0)
                 {
-                    DrawNote(snap.Note, header, size.X, fontSize);
+                    DrawNote(snap.Note, header + 6f, size.X, fontSize);
                     return;
                 }
 
-                long top = 1;
-                foreach (var row in rows)
-                    top = Math.Max(top, row.Damage);
-
-                var y = header;
+                var y = header + 6f;
                 foreach (var row in rows)
                 {
                     if (y + rowH > size.Y + 1f)
                         break;
 
-                    DrawRow(row, y, size.X, rowH, fontSize, top);
+                    DrawRow(row, y, size.X, rowH - 3f, fontSize);
                     y += rowH;
                 }
             }
@@ -51,21 +49,37 @@ namespace BardSongTracker.Windows
             }
         }
 
-        private static void DrawHeader(ParseSnapshot snap, float width, float height)
+        private static double YourDps(MeterRow[] rows)
+        {
+            foreach (var row in rows)
+            {
+                if (row.You)
+                    return row.Dps;
+            }
+
+            return 0;
+        }
+
+        private static void DrawHeader(double dps, float width, float height, float fontSize)
         {
             var font = ImGui.GetFont();
-            var fontSize = ImGui.GetFontSize();
             var origin = ImGui.GetCursorScreenPos();
             var drawList = ImGui.GetWindowDrawList();
+            var numberSize = fontSize * 1.35f;
+            var labelSize = fontSize * 0.72f;
+            var number = dps.ToString("N0");
+            var title = ImGui.ColorConvertFloat4ToU32(new Vector4(0.97f, 0.97f, 0.98f, 1f));
             var muted = ImGui.ColorConvertFloat4ToU32(new Vector4(0.68f, 0.72f, 0.78f, 1f));
-            var title = string.IsNullOrEmpty(snap.ZoneName) ? "Damage" : snap.ZoneName;
-            var clock = Clock(snap.Duration);
-            var state = snap.InPull ? "In pull" : snap.Rows.Length > 0 ? "Locked" : "";
-            var right = state.Length == 0 ? clock : $"{state}   {clock}";
-            var textY = origin.Y + Math.Max(0f, (height - fontSize) * 0.5f);
-            var rightWidth = ImGui.CalcTextSize(right).X;
-            drawList.AddText(font, fontSize, new Vector2(origin.X, textY), muted, Fit(title, Math.Max(20f, width - rightWidth - 12f)));
-            drawList.AddText(font, fontSize, new Vector2(origin.X + width - rightWidth, textY), muted, right);
+            var edge = ImGui.ColorConvertFloat4ToU32(Gold);
+            var min = origin;
+            var max = origin + new Vector2(width, height);
+            drawList.AddRectFilled(min, max, ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.04f)), 4f);
+            drawList.AddRectFilled(min, new Vector2(min.X + 3f, max.Y), edge, 2f);
+
+            var stack = numberSize + labelSize;
+            var textY = min.Y + Math.Max(2f, (height - stack) * 0.5f);
+            drawList.AddText(font, numberSize, new Vector2(min.X + 12f, textY), title, number);
+            drawList.AddText(font, labelSize, new Vector2(min.X + 12f, textY + numberSize), muted, "rDPS");
         }
 
         private static void DrawNote(string note, float y, float width, float fontSize)
@@ -74,69 +88,58 @@ namespace BardSongTracker.Windows
             var origin = ImGui.GetCursorScreenPos();
             var muted = ImGui.ColorConvertFloat4ToU32(new Vector4(0.75f, 0.78f, 0.84f, 1f));
             var text = string.IsNullOrWhiteSpace(note) ? "Waiting for a pull." : note;
-            ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y + 4f), muted, Fit(text, width));
+            ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y), muted, Fit(text, width));
         }
 
-        private static void DrawRow(MeterRow row, float y, float width, float rowH, float fontSize, long top)
+        private static void DrawRow(MeterRow row, float y, float width, float rowH, float fontSize)
         {
             var font = ImGui.GetFont();
             var origin = ImGui.GetCursorScreenPos();
             var drawList = ImGui.GetWindowDrawList();
-            var color = JobColor(row.JobId);
+            var parse = (int)Math.Clamp(Math.Round(row.Share), 0, 100);
+            var color = PercentileScale.Color(parse);
             var min = origin + new Vector2(0f, y);
-            var max = origin + new Vector2(width, y + rowH - 2f);
-            var track = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.04f));
-            var fill = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, row.You ? 0.55f : 0.34f));
-            var text = ImGui.ColorConvertFloat4ToU32(row.You
+            var max = origin + new Vector2(width, y + rowH);
+            var track = ImGui.ColorConvertFloat4ToU32(new Vector4(0.04f, 0.045f, 0.06f, 0.55f));
+            var fill = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, row.You ? 0.42f : 0.28f));
+            var nameColor = ImGui.ColorConvertFloat4ToU32(row.You
                 ? new Vector4(0.98f, 0.98f, 0.99f, 1f)
-                : new Vector4(0.86f, 0.88f, 0.92f, 1f));
-            var accent = ImGui.ColorConvertFloat4ToU32(color);
+                : new Vector4(0.90f, 0.92f, 0.95f, 1f));
+            var packed = ImGui.ColorConvertFloat4ToU32(color);
+            var edge = ImGui.ColorConvertFloat4ToU32(Gold);
 
-            drawList.AddRectFilled(min, max, track, 3f);
-            var fraction = top <= 0 ? 0f : Math.Clamp((float)row.Damage / top, 0f, 1f);
+            drawList.AddRectFilled(min, max, track, 4f);
+            var fraction = parse / 100f;
             if (fraction > 0f)
-                drawList.AddRectFilled(min, new Vector2(min.X + (width * fraction), max.Y), fill, 3f);
-            drawList.AddRectFilled(min, new Vector2(min.X + 3f, max.Y), accent, 2f);
+                drawList.AddRectFilled(min, new Vector2(min.X + (width * fraction), max.Y), fill, 4f);
+            drawList.AddRectFilled(min, new Vector2(min.X + 3f, max.Y), edge, 2f);
 
-            var damage = row.Damage.ToString("N0");
-            var share = $"{row.Share:0}%";
-            var showDps = width >= 430f;
-            var dps = row.Dps.ToString("N0");
-            var shareWidth = Math.Max(ImGui.CalcTextSize("100%").X, ImGui.CalcTextSize(share).X);
-            var damageWidth = Math.Max(ImGui.CalcTextSize("99,999,999").X, ImGui.CalcTextSize(damage).X);
-            var dpsWidth = showDps ? Math.Max(ImGui.CalcTextSize("999,999").X, ImGui.CalcTextSize(dps).X) : 0f;
-            const float gap = 10f;
-            var textY = min.Y + Math.Max(0f, (rowH - 2f - fontSize) * 0.5f);
-            var shareX = max.X - 8f - shareWidth;
-            var damageX = shareX - gap - damageWidth;
-            var dpsX = damageX - gap - dpsWidth;
-            var nameMax = (showDps ? dpsX : damageX) - gap - (min.X + 10f);
-
-            drawList.AddText(font, fontSize, new Vector2(min.X + 10f, textY), text, Fit(row.Name, Math.Max(24f, nameMax)));
-            if (showDps)
-                drawList.AddText(font, fontSize, new Vector2(dpsX, textY), text, dps);
-            drawList.AddText(font, fontSize, new Vector2(damageX, textY), text, damage);
-            drawList.AddText(font, fontSize, new Vector2(shareX, textY), text, share);
-        }
-
-        private static Vector4 JobColor(int jobId)
-        {
-            if (jobId <= 0)
-                return new Vector4(0.72f, 0.74f, 0.78f, 1f);
-
-            foreach (var job in DotCatalog.Jobs)
+            var number = parse.ToString();
+            var labelSize = fontSize * 0.68f;
+            var showCaption = rowH >= 30f;
+            var numberWidth = Width(number, fontSize, fontSize);
+            var block = showCaption ? fontSize + labelSize : fontSize;
+            var textY = min.Y + Math.Max(1f, (rowH - block) * 0.5f);
+            var nameY = min.Y + Math.Max(1f, (rowH - fontSize) * 0.5f);
+            var numberX = max.X - 10f - numberWidth;
+            drawList.AddText(font, fontSize, new Vector2(min.X + 12f, nameY), nameColor, Fit(FirstName(row.Name), Math.Max(24f, numberX - min.X - 20f)));
+            drawList.AddText(font, fontSize, new Vector2(numberX, textY), packed, number);
+            if (showCaption)
             {
-                if (job.Id == (uint)jobId)
-                    return DotCatalog.RoleColor(job.Role);
+                var caption = "Parse";
+                var captionWidth = Width(caption, labelSize, fontSize);
+                drawList.AddText(font, labelSize, new Vector2(max.X - 10f - captionWidth, textY + fontSize), packed, caption);
             }
-
-            return new Vector4(0.72f, 0.74f, 0.78f, 1f);
         }
 
-        private static string Clock(TimeSpan duration)
+        private static string FirstName(string name)
         {
-            var seconds = Math.Max(0, (int)duration.TotalSeconds);
-            return $"{seconds / 60}:{seconds % 60:00}";
+            if (string.IsNullOrWhiteSpace(name))
+                return "Player";
+
+            var trimmed = name.Trim();
+            var space = trimmed.IndexOf(' ');
+            return space <= 0 ? trimmed : trimmed[..space];
         }
 
         private static string Fit(string text, float maxWidth)
@@ -149,6 +152,14 @@ namespace BardSongTracker.Windows
                 cut = cut[..^1];
 
             return cut + "…";
+        }
+
+        private static float Width(string text, float size, float fontSize)
+        {
+            if (fontSize <= 0f)
+                return 0f;
+
+            return ImGui.CalcTextSize(text).X * (size / fontSize);
         }
     }
 }

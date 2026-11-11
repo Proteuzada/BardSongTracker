@@ -18,7 +18,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 ## Live parse
 
-The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. Each row is a player: a bar, the damage, and that player's share of the pull. Pet damage is added to the owner. Drag any corner of the meter to resize it. The rows grow and shrink with the window. Show or hide it from the General tab.
+The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. The header shows your damage per second once. Each row is another player, first name only, with that player's share of the pull. Pet damage is added to the owner. Drag any corner of the meter to resize it. Show or hide it from the General tab.
 
 ## Install from Dalamud, without compiling
 
