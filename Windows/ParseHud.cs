@@ -1,4 +1,6 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Textures;
+using Dalamud.Plugin.Services;
 using BardSongTracker.Parse;
 using System;
 using System.Collections.Generic;
@@ -17,10 +19,10 @@ namespace BardSongTracker.Windows
         {
             var scale = ClampScale(meterScale);
             var rows = onlyYou ? 1 : 8;
-            return new Vector2(200f * Math.Clamp(scale, 1f, 1.6f), 12f + (14f * scale) + (15f * scale * rows));
+            return new Vector2(220f * Math.Clamp(scale, 1f, 1.6f), 12f + (14f * scale) + (15f * scale * rows));
         }
 
-        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou = false, float meterScale = 1f)
+        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou, float meterScale, ITextureProvider textures)
         {
             if (size.X < 8f || size.Y < 8f)
                 return;
@@ -68,7 +70,7 @@ namespace BardSongTracker.Windows
                         break;
 
                     var roleTop = topByRole.TryGetValue(FightRole(row.JobId), out var best) ? best : 0d;
-                    DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, roleTop, nameSize);
+                    DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, roleTop, nameSize, textures);
                     y += rowH;
                     shown++;
                 }
@@ -110,7 +112,7 @@ namespace BardSongTracker.Windows
             ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y), muted, Fit(text, width, fontSize));
         }
 
-        private static void DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, double top, float nameSize)
+        private static void DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, double top, float nameSize, ITextureProvider textures)
         {
             var font = ImGui.GetFont();
             var fontSize = ImGui.GetFontSize();
@@ -140,7 +142,10 @@ namespace BardSongTracker.Windows
             var dpsText = Thousands(row.Dps);
             var dpsWidth = ImGui.CalcTextSize(dpsText).X;
             var dpsX = min.X + 8f + Math.Max(0f, dpsCol - dpsWidth);
-            var nameX = min.X + 8f + dpsCol + 6f;
+            var icon = Math.Max(12f, rowH - 1f);
+            var iconX = min.X + 8f + dpsCol + 6f;
+            var nameX = iconX + icon + 4f;
+            DrawJobIcon(drawList, textures, row.JobId, iconX, min.Y + Math.Max(0f, (rowH - icon) * 0.5f), icon);
             var parseText = parse.ToString(CultureInfo.InvariantCulture);
             var parseX = max.X - 8f - parseCol;
             var nameWidth = Math.Max(16f, parseX - nameX - 6f);
@@ -148,6 +153,23 @@ namespace BardSongTracker.Windows
             drawList.AddText(font, fontSize, new Vector2(dpsX, textY), numberColor, dpsText);
             drawList.AddText(font, nameSize, new Vector2(nameX, nameY), nameColor, Fit(FirstName(row.Name), nameWidth, nameSize));
             drawList.AddText(font, fontSize, new Vector2(parseX + parseCol - ImGui.CalcTextSize(parseText).X, textY), packed, parseText);
+        }
+
+        private static void DrawJobIcon(ImDrawListPtr drawList, ITextureProvider textures, int jobId, float x, float y, float size)
+        {
+            if (jobId <= 0)
+                return;
+
+            var lookup = new GameIconLookup((uint)(62100 + jobId));
+            var handle = textures.GetFromGameIcon(lookup).GetWrapOrEmpty().Handle;
+            drawList.AddImageRounded(
+                handle,
+                new Vector2(x, y),
+                new Vector2(x + size, y + size),
+                Vector2.Zero,
+                Vector2.One,
+                0xFFFFFFFFu,
+                2f);
         }
 
         private static float ClampScale(float meterScale)

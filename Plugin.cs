@@ -23,6 +23,7 @@ namespace BardSongTracker
         public ICommandManager CommandManager { get; init; }
         public IPluginLog PluginLog { get; init; }
         public ITargetManager TargetManager { get; init; }
+        public ITextureProvider TextureProvider { get; init; }
 
         public Configuration Configuration { get; init; }
         public WindowSystem WindowSystem { get; init; } = new("BardSongTracker");
@@ -44,7 +45,8 @@ namespace BardSongTracker
             IFramework framework,
             ICommandManager commandManager,
             IPluginLog pluginLog,
-            ITargetManager targetManager)
+            ITargetManager targetManager,
+            ITextureProvider textureProvider)
         {
             PluginInterface = pluginInterface;
             ClientState = clientState;
@@ -54,6 +56,7 @@ namespace BardSongTracker
             CommandManager = commandManager;
             PluginLog = pluginLog;
             TargetManager = targetManager;
+            TextureProvider = textureProvider;
 
             Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
             Configuration.Initialize(PluginInterface);
@@ -75,7 +78,7 @@ namespace BardSongTracker
                 CurrentJobId,
                 ApplyParseSettings);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
-            ParseOverlay = new ParseOverlayWindow(Configuration, ActLog);
+            ParseOverlay = new ParseOverlayWindow(Configuration, ActLog, TextureProvider);
 
             WindowSystem.AddWindow(ConfigWindow);
             WindowSystem.AddWindow(OverlayWindow);

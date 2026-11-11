@@ -1,5 +1,6 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using BardSongTracker.Parse;
 using System;
 using System.Numerics;
@@ -10,8 +11,9 @@ namespace BardSongTracker.Windows
     {
         private readonly Configuration configuration;
         private readonly ActLogFollower follower;
+        private readonly ITextureProvider textures;
 
-        public ParseOverlayWindow(Configuration configuration, ActLogFollower follower) : base(
+        public ParseOverlayWindow(Configuration configuration, ActLogFollower follower, ITextureProvider textures) : base(
             "BardSongTrackerParse",
             ImGuiWindowFlags.NoTitleBar |
             ImGuiWindowFlags.NoFocusOnAppearing |
@@ -29,6 +31,7 @@ namespace BardSongTracker.Windows
             this.BgAlpha = 0.64f;
             this.configuration = configuration;
             this.follower = follower;
+            this.textures = textures;
         }
 
         public void Dispose() { }
@@ -69,7 +72,7 @@ namespace BardSongTracker.Windows
             if (height < minimum.Y - 1f || width < minimum.X - 1f)
                 ImGui.SetWindowSize(new Vector2(Math.Max(width, minimum.X), Math.Max(height, minimum.Y)));
 
-            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail(), configuration.ShowOnlyMyMeter, configuration.MeterScale);
+            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail(), configuration.ShowOnlyMyMeter, configuration.MeterScale, textures);
         }
     }
 }
