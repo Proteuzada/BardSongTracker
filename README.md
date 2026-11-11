@@ -18,7 +18,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 ## Live parse
 
-The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. The header only names the columns. Each row shows that player's rDPS in front of their first name, and their parse beside it. The parse is that rDPS compared with the highest rDPS in the pull, so the leader is 100 and everyone else is lower. Pet damage is added to the owner. Drag any corner of the meter to resize it. Show or hide it from the General tab.
+The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. The header only names the columns. Each row is a thin strip with that player's rDPS in front of a smaller first name, and their parse beside it. rDPS is shown in thousands, such as 12k or 40k, so the digits stay still. Eight players fit in the meter. The parse is that rDPS compared with the highest rDPS in the pull, so the leader is 100 and everyone else is lower. Pet damage is added to the owner. Drag any corner of the meter to resize it. Show or hide it from the General tab.
 
 ## Install from Dalamud, without compiling
 

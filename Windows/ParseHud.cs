@@ -1,6 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using BardSongTracker.Parse;
 using System;
+using System.Globalization;
 using System.Numerics;
 
 namespace BardSongTracker.Windows
@@ -15,21 +16,24 @@ namespace BardSongTracker.Windows
                 return;
 
             var rows = snap.Rows ?? Array.Empty<MeterRow>();
-            var fontSize = Math.Clamp(size.Y / Math.Max(rows.Length + 1.4f, 3f) * 0.46f, 12f, 20f);
+            var header = 14f;
+            var body = Math.Max(8f, size.Y - header - 2f);
+            var rowH = Math.Min(15f, body / 8f);
+            var fontSize = Math.Clamp(rowH * 0.72f, 10f, 12f);
+            var nameSize = Math.Clamp(fontSize * 0.78f, 9f, 10f);
             var baseSize = ImGui.GetFontSize();
             var scale = baseSize <= 0f ? 1f : fontSize / baseSize;
-            var header = Math.Max(16f, fontSize + 6f);
 
             ImGui.SetWindowFontScale(scale);
             try
             {
-                var dpsCol = Math.Max(ImGui.CalcTextSize("rDPS").X, ImGui.CalcTextSize("999,999").X);
+                var dpsCol = Math.Max(ImGui.CalcTextSize("rDPS").X, ImGui.CalcTextSize("999k").X);
                 var parseCol = Math.Max(ImGui.CalcTextSize("Parse").X, ImGui.CalcTextSize("100").X);
                 DrawHeader(size.X, header, dpsCol, parseCol);
 
                 if (rows.Length == 0)
                 {
-                    DrawNote(snap.Note, header + 4f, size.X);
+                    DrawNote(snap.Note, header + 2f, size.X);
                     return;
                 }
 
@@ -37,15 +41,14 @@ namespace BardSongTracker.Windows
                 foreach (var row in rows)
                     top = Math.Max(top, row.Dps);
 
-                var body = Math.Max(8f, size.Y - header - 4f);
-                var rowH = Math.Clamp(body / rows.Length, 20f, 42f);
-                var y = header + 4f;
-                foreach (var row in rows)
+                var y = header + 2f;
+                var limit = Math.Min(rows.Length, 8);
+                for (var i = 0; i < limit; i++)
                 {
                     if (y + rowH > size.Y + 1f)
                         break;
 
-                    DrawRow(row, y, size.X, rowH - 3f, dpsCol, parseCol, top);
+                    DrawRow(rows[i], y, size.X, Math.Max(10f, rowH - 2f), dpsCol, parseCol, top, nameSize);
                     y += rowH;
                 }
             }
@@ -65,8 +68,8 @@ namespace BardSongTracker.Windows
             var textY = origin.Y + Math.Max(0f, (height - fontSize) * 0.5f);
             var dpsLabel = "rDPS";
             var parseLabel = "Parse";
-            var dpsX = origin.X + 12f + dpsCol - ImGui.CalcTextSize(dpsLabel).X;
-            var parseX = origin.X + width - 10f - ImGui.CalcTextSize(parseLabel).X;
+            var dpsX = origin.X + 8f + dpsCol - ImGui.CalcTextSize(dpsLabel).X;
+            var parseX = origin.X + width - 8f - ImGui.CalcTextSize(parseLabel).X;
             drawList.AddText(font, fontSize, new Vector2(dpsX, textY), muted, dpsLabel);
             drawList.AddText(font, fontSize, new Vector2(parseX, textY), muted, parseLabel);
         }
@@ -78,10 +81,10 @@ namespace BardSongTracker.Windows
             var origin = ImGui.GetCursorScreenPos();
             var muted = ImGui.ColorConvertFloat4ToU32(new Vector4(0.75f, 0.78f, 0.84f, 1f));
             var text = string.IsNullOrWhiteSpace(note) ? "Waiting for a pull." : note;
-            ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y), muted, Fit(text, width));
+            ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y), muted, Fit(text, width, fontSize));
         }
 
-        private static void DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, double top)
+        private static void DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, double top, float nameSize)
         {
             var font = ImGui.GetFont();
             var fontSize = ImGui.GetFontSize();
@@ -100,23 +103,32 @@ namespace BardSongTracker.Windows
             var packed = ImGui.ColorConvertFloat4ToU32(color);
             var edge = ImGui.ColorConvertFloat4ToU32(Gold);
 
-            drawList.AddRectFilled(min, max, track, 4f);
+            drawList.AddRectFilled(min, max, track, 2f);
             if (parse > 0)
-                drawList.AddRectFilled(min, new Vector2(min.X + (width * (parse / 100f)), max.Y), fill, 4f);
-            drawList.AddRectFilled(min, new Vector2(min.X + 3f, max.Y), edge, 2f);
+                drawList.AddRectFilled(min, new Vector2(min.X + (width * (parse / 100f)), max.Y), fill, 2f);
+            drawList.AddRectFilled(min, new Vector2(min.X + 2f, max.Y), edge, 1f);
 
             var textY = min.Y + Math.Max(0f, (rowH - fontSize) * 0.5f);
-            var dpsText = row.Dps.ToString("N0");
+            var nameY = min.Y + Math.Max(0f, (rowH - nameSize) * 0.5f);
+            var dpsText = Thousands(row.Dps);
             var dpsWidth = ImGui.CalcTextSize(dpsText).X;
-            var dpsX = min.X + 12f + Math.Max(0f, dpsCol - dpsWidth);
-            var nameX = min.X + 12f + dpsCol + 10f;
-            var parseText = parse.ToString();
-            var parseX = max.X - 10f - parseCol;
-            var nameWidth = Math.Max(16f, parseX - nameX - 8f);
+            var dpsX = min.X + 8f + Math.Max(0f, dpsCol - dpsWidth);
+            var nameX = min.X + 8f + dpsCol + 6f;
+            var parseText = parse.ToString(CultureInfo.InvariantCulture);
+            var parseX = max.X - 8f - parseCol;
+            var nameWidth = Math.Max(16f, parseX - nameX - 6f);
 
             drawList.AddText(font, fontSize, new Vector2(dpsX, textY), numberColor, dpsText);
-            drawList.AddText(font, fontSize, new Vector2(nameX, textY), nameColor, Fit(FirstName(row.Name), nameWidth));
+            drawList.AddText(font, nameSize, new Vector2(nameX, nameY), nameColor, Fit(FirstName(row.Name), nameWidth, nameSize));
             drawList.AddText(font, fontSize, new Vector2(parseX + parseCol - ImGui.CalcTextSize(parseText).X, textY), packed, parseText);
+        }
+
+        private static string Thousands(double value)
+        {
+            if (value >= 1000d)
+                return Math.Round(value / 1000d, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture) + "k";
+
+            return Math.Round(value, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
         }
 
         private static string FirstName(string name)
@@ -129,16 +141,28 @@ namespace BardSongTracker.Windows
             return space <= 0 ? trimmed : trimmed[..space];
         }
 
-        private static string Fit(string text, float maxWidth)
+        private static string Fit(string text, float maxWidth, float fontSize)
         {
-            if (string.IsNullOrEmpty(text) || ImGui.CalcTextSize(text).X <= maxWidth)
-                return text ?? "";
+            if (string.IsNullOrEmpty(text))
+                return "";
+
+            if (TextWidth(text, fontSize) <= maxWidth)
+                return text;
 
             var cut = text;
-            while (cut.Length > 1 && ImGui.CalcTextSize(cut + "…").X > maxWidth)
+            while (cut.Length > 1 && TextWidth(cut + "…", fontSize) > maxWidth)
                 cut = cut[..^1];
 
             return cut + "…";
+        }
+
+        private static float TextWidth(string text, float fontSize)
+        {
+            var current = ImGui.GetFontSize();
+            if (current <= 0f)
+                return 0f;
+
+            return ImGui.CalcTextSize(text).X * (fontSize / current);
         }
     }
 }
