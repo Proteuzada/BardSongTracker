@@ -10,6 +10,8 @@ namespace BardSongTracker.Windows
     public static class ParseHud
     {
         private static readonly Vector4 Gold = new(0.90f, 0.80f, 0.50f, 1f);
+        private static readonly Dictionary<string, int> heldParse = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> seenParse = new(StringComparer.OrdinalIgnoreCase);
 
         public static Vector2 MinimumSize(float meterScale, bool onlyYou)
         {
@@ -41,6 +43,8 @@ namespace BardSongTracker.Windows
 
                 if (rows.Length == 0)
                 {
+                    heldParse.Clear();
+                    seenParse.Clear();
                     DrawNote(snap.Note, header + 2f, size.X);
                     return;
                 }
@@ -71,6 +75,8 @@ namespace BardSongTracker.Windows
 
                 if (shown == 0)
                     DrawNote(onlyYou ? "Waiting for your damage." : snap.Note, header + 2f, size.X);
+
+                ForgetUnseen();
             }
             finally
             {
@@ -110,7 +116,8 @@ namespace BardSongTracker.Windows
             var fontSize = ImGui.GetFontSize();
             var origin = ImGui.GetCursorScreenPos();
             var drawList = ImGui.GetWindowDrawList();
-            var parse = top <= 0 || row.Dps <= 0 ? 0 : (int)Math.Clamp(Math.Floor(row.Dps * 100d / top), 0, 100);
+            var raw = top <= 0 || row.Dps <= 0 ? 0 : (int)Math.Clamp(Math.Floor(row.Dps * 100d / top), 0, 100);
+            var parse = HoldParse(row.Name, raw);
             var color = PercentileScale.Color(parse);
             var min = origin + new Vector2(0f, y);
             var max = origin + new Vector2(width, y + rowH);
@@ -146,6 +153,40 @@ namespace BardSongTracker.Windows
         private static float ClampScale(float meterScale)
         {
             return Math.Clamp(meterScale, 0.8f, 2.5f);
+        }
+
+        private static int HoldParse(string name, int raw)
+        {
+            var key = string.IsNullOrWhiteSpace(name) ? "Player" : name;
+            seenParse.Add(key);
+            if (!heldParse.TryGetValue(key, out var held))
+                held = raw;
+            else if (raw > held || held - raw >= 2)
+                held = raw;
+
+            heldParse[key] = held;
+            return held;
+        }
+
+        private static void ForgetUnseen()
+        {
+            if (heldParse.Count != seenParse.Count)
+            {
+                List<string> drop = null;
+                foreach (var key in heldParse.Keys)
+                {
+                    if (!seenParse.Contains(key))
+                        (drop ??= new List<string>()).Add(key);
+                }
+
+                if (drop != null)
+                {
+                    foreach (var key in drop)
+                        heldParse.Remove(key);
+                }
+            }
+
+            seenParse.Clear();
         }
 
         private static CombatRole FightRole(int jobId)
