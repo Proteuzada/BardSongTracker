@@ -11,6 +11,11 @@ namespace BardSongTracker.Parse
     public sealed class PullMeter
     {
         private readonly Dictionary<string, Actor> actors = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> damagedEnemies = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> killedEnemies = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> aggroDropped = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> hpRestored = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, long> enemyMaxHp = new(StringComparer.OrdinalIgnoreCase);
         private string playerId = "";
         private string zoneName = "";
         private bool inPull;
@@ -20,10 +25,14 @@ namespace BardSongTracker.Parse
 
         public void Apply(string line, DateTimeOffset clock)
         {
-            if (string.IsNullOrEmpty(line) || line.Length < 3 || line[2] != '|')
+            if (string.IsNullOrEmpty(line))
                 return;
 
-            var type = line[..2];
+            var split = line.IndexOf('|');
+            if (split < 2 || split > 3)
+                return;
+
+            var type = line[..split];
             var fields = line.Split('|');
             switch (type)
             {
@@ -39,6 +48,18 @@ namespace BardSongTracker.Parse
                 case "21":
                 case "22":
                     ApplyAbility(fields, clock);
+                    break;
+                case "25":
+                    ApplyDeath(fields);
+                    break;
+                case "33":
+                    ApplyDirector(fields);
+                    break;
+                case "260":
+                    ApplyCombatState(fields);
+                    break;
+                case "261":
+                    ApplyCombatantMemory(fields);
                     break;
             }
         }
@@ -125,9 +146,7 @@ namespace BardSongTracker.Parse
                 return;
 
             zoneName = fields[3];
-            ClearDamage();
-            inPull = false;
-            lockedDuration = TimeSpan.Zero;
+            ResetPull();
         }
 
         private void ApplyPlayer(string[] fields)
@@ -202,6 +221,7 @@ namespace BardSongTracker.Parse
             if (!inPull)
             {
                 ClearDamage();
+                ClearEncounter();
                 inPull = true;
                 pullStart = when;
                 lockedDuration = TimeSpan.Zero;
@@ -213,6 +233,108 @@ namespace BardSongTracker.Parse
 
             credit.Damage += hit;
             lastEvent = when;
+            if (IsEnemy(targetId))
+                damagedEnemies.Add(targetId);
+        }
+
+        private void ApplyDeath(string[] fields)
+        {
+            if (fields.Length < 3 || !IsEnemy(fields[2]))
+                return;
+
+            killedEnemies.Add(fields[2]);
+        }
+
+        private void ApplyDirector(string[] fields)
+        {
+            if (fields.Length < 4 || !IsWipe(fields[3]))
+                return;
+
+            ResetPull();
+        }
+
+        private void ApplyCombatState(string[] fields)
+        {
+            if (fields.Length < 6 || fields[2] != "0" || fields[3] != "0" || fields[5] != "1")
+                return;
+
+            if (!HasDamage() || killedEnemies.Count > 0)
+                return;
+
+            ResetPull();
+        }
+
+        private void ApplyCombatantMemory(string[] fields)
+        {
+            if (fields.Length < 4 || !IsEnemy(fields[3]))
+                return;
+
+            var id = fields[3];
+            long? currentHp = null;
+            long? maxHp = null;
+            int? aggression = null;
+            for (var i = 4; i + 1 < fields.Length; i += 2)
+            {
+                if (fields[i].Equals("CurrentHP", StringComparison.OrdinalIgnoreCase))
+                    currentHp = ParseLong(fields[i + 1]);
+                else if (fields[i].Equals("MaxHP", StringComparison.OrdinalIgnoreCase))
+                    maxHp = ParseLong(fields[i + 1]);
+                else if (fields[i].Equals("AggressionStatus", StringComparison.OrdinalIgnoreCase))
+                    aggression = ParseInt(fields[i + 1]);
+            }
+
+            if (maxHp is > 0)
+                enemyMaxHp[id] = maxHp.Value;
+
+            if (!fields[2].Equals("Change", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!damagedEnemies.Contains(id) || killedEnemies.Contains(id))
+                return;
+
+            if (aggression == 0)
+                aggroDropped.Add(id);
+
+            if (currentHp is not null && enemyMaxHp.TryGetValue(id, out var known) && known > 0 && currentHp.Value >= known)
+                hpRestored.Add(id);
+
+            if (LivingEnemiesReset())
+                ResetPull();
+        }
+
+        private bool LivingEnemiesReset()
+        {
+            var anyLiving = false;
+            foreach (var id in damagedEnemies)
+            {
+                if (killedEnemies.Contains(id))
+                    continue;
+
+                anyLiving = true;
+                if (!aggroDropped.Contains(id) && !hpRestored.Contains(id))
+                    return false;
+            }
+
+            return anyLiving;
+        }
+
+        private static long? ParseLong(string text)
+        {
+            return long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+        }
+
+        private static int? ParseInt(string text)
+        {
+            return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+        }
+
+        private static bool IsWipe(string command)
+        {
+            return command.Equals("40000005", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("40000006", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("4000000F", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("40000010", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("40000011", StringComparison.OrdinalIgnoreCase)
+                || command.Equals("40000012", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string CreditName(string[] fields, string creditId, string sourceId)
@@ -242,6 +364,27 @@ namespace BardSongTracker.Parse
         {
             foreach (var actor in actors.Values)
                 actor.Damage = 0;
+        }
+
+        private void ResetPull()
+        {
+            ClearDamage();
+            ClearEncounter();
+            inPull = false;
+            lockedDuration = TimeSpan.Zero;
+        }
+
+        private void ClearEncounter()
+        {
+            damagedEnemies.Clear();
+            killedEnemies.Clear();
+            aggroDropped.Clear();
+            hpRestored.Clear();
+        }
+
+        private static bool IsEnemy(string id)
+        {
+            return id.Length >= 4 && id.StartsWith("40", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool SameActor(string left, string right)
