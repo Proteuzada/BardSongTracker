@@ -1,3 +1,6 @@
+using Dalamud.Interface;
+using Dalamud.Interface.Colors;
+using Dalamud.Interface.Components;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.JobGauge.Enums;
@@ -19,6 +22,7 @@ namespace BardSongTracker.Windows
         private readonly Func<uint?> currentJobId;
         private readonly Action? onParseSettingsChanged;
         private readonly Func<ParseSnapshot>? parseSnapshot;
+        private readonly IUiBuilder? ui;
         private string actLogDraft = "";
         private string rankingsDraft = "";
         private bool parseDraftReady;
@@ -35,7 +39,8 @@ namespace BardSongTracker.Windows
             SoundAlert soundAlert,
             Func<uint?> currentJobId,
             Action? onParseSettingsChanged = null,
-            Func<ParseSnapshot>? parseSnapshot = null) : base("Bard Song Tracker")
+            Func<ParseSnapshot>? parseSnapshot = null,
+            IUiBuilder? ui = null) : base("Bard Song Tracker")
         {
             this.Size = new Vector2(920, 700);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -52,6 +57,7 @@ namespace BardSongTracker.Windows
             this.currentJobId = currentJobId;
             this.onParseSettingsChanged = onParseSettingsChanged;
             this.parseSnapshot = parseSnapshot;
+            this.ui = ui;
         }
 
         public void Dispose() { }
@@ -185,7 +191,8 @@ namespace BardSongTracker.Windows
             }
 
             PanelTitle("This pull");
-            ParseHud.Draw(parseSnapshot?.Invoke() ?? default);
+            if (ui != null)
+                ParseHud.Draw(parseSnapshot?.Invoke() ?? default, ui);
             ImGui.Spacing();
             ImGui.TextDisabled("Name, damage, and time stay on the left. The percentile stays on the right. Drag the overlay in game to move it.");
             ImGui.Spacing();
@@ -210,6 +217,8 @@ namespace BardSongTracker.Windows
             BeginPanel("bst-parse-log", new Vector2(column, 188f));
             PanelTitle("ACT log");
             ImGui.Text("Folder");
+            ImGui.SameLine();
+            ImGuiComponents.HelpMarker("Leave this empty to use the usual Advanced Combat Tracker\\FFXIVLogs folders. ACT has to stay open and write Network_*.log. The meter does not copy the DPS number from the ACT window.");
             ImGui.SetNextItemWidth(-1f);
             if (ImGui.InputText("##act-log", ref actLogDraft, 520))
             {
@@ -225,6 +234,8 @@ namespace BardSongTracker.Windows
             BeginPanel("bst-parse-rank", new Vector2(0f, 280f));
             PanelTitle("Ranking table");
             ImGui.Text("JSON file");
+            ImGui.SameLine();
+            ImGuiComponents.HelpMarker("Percentile DPS for each zone and job. The curve on the overlay is this table. A score halfway between the 95 and 99 marks is a 97. Use pDPS marks. rDPS also moves buff damage between players, and this total does not.");
             ImGui.SetNextItemWidth(-1f);
             if (ImGui.InputText("##rankings", ref rankingsDraft, 520))
             {
@@ -250,13 +261,13 @@ namespace BardSongTracker.Windows
         {
             (string Label, Vector4 Color, bool DarkText)[] bands =
             [
-                ("100", new Vector4(0.90f, 0.80f, 0.50f, 1f), true),
-                ("99", new Vector4(0.89f, 0.41f, 0.66f, 1f), false),
-                ("95", new Vector4(1.00f, 0.50f, 0.00f, 1f), true),
-                ("75", new Vector4(0.64f, 0.21f, 0.93f, 1f), false),
-                ("50", new Vector4(0.00f, 0.44f, 1.00f, 1f), false),
-                ("25", new Vector4(0.12f, 1.00f, 0.00f, 1f), true),
-                ("0", new Vector4(0.62f, 0.62f, 0.62f, 1f), false),
+                ("100", ImGuiColors.ParsedGold, true),
+                ("99", ImGuiColors.ParsedPink, false),
+                ("95", ImGuiColors.ParsedOrange, true),
+                ("75", ImGuiColors.ParsedPurple, false),
+                ("50", ImGuiColors.ParsedBlue, false),
+                ("25", ImGuiColors.ParsedGreen, true),
+                ("0", ImGuiColors.ParsedGrey, false),
             ];
 
             var origin = ImGui.GetCursorScreenPos();

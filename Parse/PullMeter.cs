@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace BardSongTracker.Parse
@@ -76,6 +77,7 @@ namespace BardSongTracker.Parse
             var seconds = Math.Max(duration.TotalSeconds, 0);
             var dps = seconds >= 1 ? damage / seconds : 0;
             int? percentile = null;
+            var ladder = Array.Empty<PercentileScale.Point>();
             var note = "";
 
             if (!string.IsNullOrEmpty(error))
@@ -89,6 +91,7 @@ namespace BardSongTracker.Parse
             else if (damage > 0 && rankings != null && rankings.TryMatch(zoneId, zoneName, jobId, out var entry) && entry.Points.Count > 0)
             {
                 percentile = PercentileScale.Interpolate(dps, entry.Points);
+                ladder = CopyLadder(entry.Points);
                 note = "Estimated from the ranking table.";
             }
             else if (damage > 0)
@@ -112,7 +115,18 @@ namespace BardSongTracker.Parse
                 damage,
                 dps,
                 percentile,
-                note);
+                note,
+                ladder);
+        }
+
+        private static PercentileScale.Point[] CopyLadder(List<PercentileScale.Point> points)
+        {
+            var copy = new PercentileScale.Point[points.Count];
+            for (var i = 0; i < points.Count; i++)
+                copy[i] = points[i];
+
+            Array.Sort(copy, static (left, right) => left.Percentile.CompareTo(right.Percentile));
+            return copy;
         }
 
         private void ApplyZone(string[] fields)
@@ -231,5 +245,6 @@ namespace BardSongTracker.Parse
         long Damage,
         double Dps,
         int? Percentile,
-        string Note);
+        string Note,
+        PercentileScale.Point[] Ladder);
 }

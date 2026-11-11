@@ -1,4 +1,10 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Bindings.ImPlot;
+using Dalamud.Interface;
+using Dalamud.Interface.Colors;
+using Dalamud.Interface.Components;
+using Dalamud.Interface.ManagedFontAtlas;
+using Dalamud.Interface.Utility.Raii;
 using BardSongTracker.Parse;
 using System;
 using System.Numerics;
@@ -7,110 +13,182 @@ namespace BardSongTracker.Windows
 {
     public static class ParseHud
     {
-        public static void Draw(ParseSnapshot snap)
+        public static void Draw(ParseSnapshot snap, IUiBuilder ui)
         {
-            var font = ImGui.GetFont();
             var fontSize = ImGui.GetFontSize();
-            var nameSize = fontSize * 1.22f;
-            var statSize = fontSize * 1.08f;
-            var parseSize = fontSize * 2.15f;
-            const float pad = 12f;
-            const float accent = 3f;
-            const float chipWidth = 84f;
-            const float gap = 16f;
-            const float columnGap = 22f;
+            var width = Math.Max(540f, fontSize * 36f);
+            var plotHeight = Math.Max(118f, fontSize * 7.4f);
+            var height = (fontSize * 8.6f) + plotHeight;
+            var color = Band(snap.Percentile);
 
-            var name = string.IsNullOrWhiteSpace(snap.PlayerName) ? "You" : snap.PlayerName;
-            var meta = Meta(snap);
-            var damage = snap.Damage.ToString("N0");
-            var dps = snap.Dps.ToString("N0");
-            var clock = Clock(snap.Duration);
-            var status = Status(snap);
-            var percentileText = snap.Percentile?.ToString() ?? "--";
-            var color = snap.Percentile is int percentile
-                ? PercentileScale.Color(percentile)
-                : new Vector4(0.73f, 0.78f, 0.86f, 1f);
+            using var rounding = ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, 12f);
+            using var padding = ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(16f, 14f));
+            using var frame = ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 8f);
+            using var background = ImRaii.PushColor(ImGuiCol.ChildBg, new Vector4(0.055f, 0.06f, 0.08f, 0.94f));
+            using var border = ImRaii.PushColor(ImGuiCol.Border, new Vector4(color.X, color.Y, color.Z, 0.7f));
+            using var child = ImRaii.Child("bst-parse-hud", new Vector2(width, height), true, ImGuiWindowFlags.NoScrollbar);
+            if (!child)
+                return;
 
-            var damageWidth = Math.Max(Width(damage, statSize, fontSize), Width("Damage", fontSize, fontSize));
-            var dpsWidth = Math.Max(Width(dps, statSize, fontSize), Width("pDPS", fontSize, fontSize));
-            var timeWidth = Math.Max(Width(clock, statSize, fontSize), Width("Time", fontSize, fontSize));
-            var statsWidth = damageWidth + columnGap + dpsWidth + columnGap + timeWidth;
-
-            var left = statsWidth;
-            left = Math.Max(left, Width(name, nameSize, fontSize));
-            left = Math.Max(left, Width(meta, fontSize, fontSize));
-            left = Math.Max(left, Math.Min(Width(status, fontSize, fontSize), 340f));
-            left = Math.Max(left, 250f);
-
-            var width = pad + accent + 10f + left + gap + chipWidth + pad;
-            var block = nameSize + 5f + fontSize + 12f + statSize + 3f + fontSize + 10f + fontSize;
-            var height = Math.Max(pad * 2f + block, pad * 2f + parseSize + fontSize + 10f);
-
-            var origin = ImGui.GetCursorScreenPos();
-            var max = origin + new Vector2(width, height);
-            var drawList = ImGui.GetWindowDrawList();
-            var packed = ImGui.ColorConvertFloat4ToU32(color);
-            var title = ImGui.ColorConvertFloat4ToU32(new Vector4(0.96f, 0.97f, 0.98f, 1f));
-            var muted = ImGui.ColorConvertFloat4ToU32(new Vector4(0.70f, 0.74f, 0.80f, 1f));
-            var background = ImGui.ColorConvertFloat4ToU32(new Vector4(0.045f, 0.05f, 0.07f, 0.9f));
-            var border = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, 0.42f));
-            var chip = ImGui.ColorConvertFloat4ToU32(new Vector4(
-                0.05f + (color.X * 0.16f),
-                0.055f + (color.Y * 0.16f),
-                0.07f + (color.Z * 0.16f),
-                0.95f));
-
-            drawList.AddRectFilled(origin, max, background, 8f, ImDrawFlags.RoundCornersAll);
-            drawList.AddRect(origin, max, border, 8f, ImDrawFlags.RoundCornersAll, 1.25f);
-            drawList.AddRectFilled(
-                new Vector2(origin.X + pad, origin.Y + pad),
-                new Vector2(origin.X + pad + accent, max.Y - pad),
-                packed,
-                2f);
-
-            var textX = origin.X + pad + accent + 10f;
-            var y = origin.Y + pad;
-            drawList.AddText(font, nameSize, new Vector2(textX, y), title, name);
-            y += nameSize + 5f;
-            drawList.AddText(font, fontSize, new Vector2(textX, y), muted, meta);
-            y += fontSize + 12f;
-
-            drawList.AddText(font, statSize, new Vector2(textX, y), title, damage);
-            drawList.AddText(font, statSize, new Vector2(textX + damageWidth + columnGap, y), packed, dps);
-            drawList.AddText(font, statSize, new Vector2(textX + damageWidth + columnGap + dpsWidth + columnGap, y), title, clock);
-            y += statSize + 3f;
-            drawList.AddText(font, fontSize, new Vector2(textX, y), muted, "Damage");
-            drawList.AddText(font, fontSize, new Vector2(textX + damageWidth + columnGap, y), muted, "pDPS");
-            drawList.AddText(font, fontSize, new Vector2(textX + damageWidth + columnGap + dpsWidth + columnGap, y), muted, "Time");
-            y += fontSize + 10f;
-            drawList.AddText(font, fontSize, new Vector2(textX, y), muted, status);
-
-            var chipMin = new Vector2(max.X - pad - chipWidth, origin.Y + pad);
-            var chipMax = new Vector2(max.X - pad, max.Y - pad);
-            drawList.AddRectFilled(chipMin, chipMax, chip, 6f, ImDrawFlags.RoundCornersAll);
-            drawList.AddRect(chipMin, chipMax, border, 6f, ImDrawFlags.RoundCornersAll, 1f);
-
-            var numberWidth = Width(percentileText, parseSize, fontSize);
-            var labelWidth = Width("parse", fontSize * 0.85f, fontSize);
-            var stack = parseSize + 2f + (fontSize * 0.85f);
-            var numberX = chipMin.X + ((chipWidth - numberWidth) * 0.5f);
-            var numberY = chipMin.Y + (((chipMax.Y - chipMin.Y) - stack) * 0.5f);
-            drawList.AddText(font, parseSize, new Vector2(numberX, numberY), packed, percentileText);
-            drawList.AddText(
-                font,
-                fontSize * 0.85f,
-                new Vector2(chipMin.X + ((chipWidth - labelWidth) * 0.5f), numberY + parseSize + 2f),
-                muted,
-                "parse");
-
-            ImGui.Dummy(new Vector2(width, height));
+            DrawIdentity(snap, ui, color, width - 132f);
+            ImGui.Spacing();
+            DrawStats(snap, ui, color);
+            ImGui.Spacing();
+            DrawLadder(snap, new Vector2(ImGui.GetContentRegionAvail().X, plotHeight), color);
         }
 
-        private static string Meta(ParseSnapshot snap)
+        private static void DrawIdentity(ParseSnapshot snap, IUiBuilder ui, Vector4 color, float textWidth)
         {
+            var name = string.IsNullOrWhiteSpace(snap.PlayerName) ? "You" : snap.PlayerName;
             var zone = string.IsNullOrEmpty(snap.ZoneName) ? "No zone yet" : snap.ZoneName;
             var job = JobLabel(snap.JobId);
-            return job.Length == 0 ? zone : $"{job}    {zone}";
+            var badgeWidth = 96f;
+            var rowHeight = ImGui.GetFrameHeight() * 2.7f;
+            var top = ImGui.GetCursorPos();
+
+            ImGui.BeginGroup();
+            Icon(ui.IconFontHandle, FontAwesomeIcon.User, color);
+            ImGui.SameLine();
+            ImGui.Text(name);
+            if (job.Length > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(color, job);
+            }
+
+            Icon(ui.IconFontHandle, FontAwesomeIcon.MapMarkerAlt, ImGuiColors.DalamudGrey);
+            ImGui.SameLine();
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + Math.Max(80f, textWidth));
+            ImGui.TextDisabled(zone);
+            ImGui.PopTextWrapPos();
+            ImGui.TextDisabled(Status(snap));
+            ImGui.EndGroup();
+
+            var block = ImGui.GetItemRectSize().Y;
+            ImGui.SetCursorPos(new Vector2(top.X + textWidth, top.Y));
+            DrawBadge(snap, color, new Vector2(badgeWidth, Math.Max(rowHeight, block)));
+            ImGui.SetCursorPos(new Vector2(top.X, top.Y + Math.Max(block, rowHeight)));
+        }
+
+        private static void DrawBadge(ParseSnapshot snap, Vector4 color, Vector2 size)
+        {
+            using var rounding = ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, 8f);
+            using var background = ImRaii.PushColor(ImGuiCol.ChildBg, new Vector4(color.X, color.Y, color.Z, 0.16f));
+            using var border = ImRaii.PushColor(ImGuiCol.Border, new Vector4(color.X, color.Y, color.Z, 0.85f));
+            using var badge = ImRaii.Child("bst-parse-badge", size, true, ImGuiWindowFlags.NoScrollbar);
+            if (!badge)
+                return;
+
+            var number = snap.Percentile?.ToString() ?? "--";
+            var numberWidth = ImGui.CalcTextSize(number).X;
+            ImGui.SetCursorPosX(Math.Max(0f, (size.X - numberWidth) * 0.5f));
+            ImGui.TextColored(color, number);
+            var labelWidth = ImGui.CalcTextSize("PARSE").X;
+            ImGui.SetCursorPosX(Math.Max(0f, (size.X - labelWidth) * 0.5f));
+            ImGui.TextDisabled("PARSE");
+        }
+
+        private static void DrawStats(ParseSnapshot snap, IUiBuilder ui, Vector4 color)
+        {
+            using var table = ImRaii.Table(
+                "bst-parse-stats",
+                3,
+                ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.NoPadOuterX | ImGuiTableFlags.NoSavedSettings);
+            if (!table)
+                return;
+
+            ImGui.TableNextColumn();
+            Stat(ui, FontAwesomeIcon.Burst, "Damage", snap.Damage.ToString("N0"), color);
+            ImGui.TableNextColumn();
+            Stat(ui, FontAwesomeIcon.Bolt, "pDPS", snap.Dps.ToString("N0"), color);
+            ImGui.TableNextColumn();
+            Stat(ui, FontAwesomeIcon.Stopwatch, "Time", Clock(snap.Duration), color);
+        }
+
+        private static void Stat(IUiBuilder ui, FontAwesomeIcon icon, string label, string value, Vector4 color)
+        {
+            Icon(ui.IconFontHandle, icon, color);
+            ImGui.SameLine();
+            ImGuiComponents.TextWithLabel(label, value);
+        }
+
+        private static unsafe void DrawLadder(ParseSnapshot snap, Vector2 size, Vector4 color)
+        {
+            var ladder = snap.Ladder ?? Array.Empty<PercentileScale.Point>();
+            var yMax = 1d;
+            for (var i = 0; i < ladder.Length; i++)
+                yMax = Math.Max(yMax, ladder[i].Dps);
+            yMax = Math.Max(yMax, snap.Dps) * 1.08d;
+
+            var plotFlags = ImPlotFlags.CanvasOnly | ImPlotFlags.NoFrame | ImPlotFlags.NoInputs | ImPlotFlags.NoChild;
+            var axisFlags = ImPlotAxisFlags.Lock | ImPlotAxisFlags.NoMenus | ImPlotAxisFlags.NoHighlight;
+
+            ImPlot.PushStyleColor(ImPlotCol.Bg, new Vector4(0.03f, 0.035f, 0.05f, 0.8f));
+            ImPlot.PushStyleColor(ImPlotCol.AxisGrid, new Vector4(1f, 1f, 1f, 0.08f));
+            ImPlot.PushStyleColor(ImPlotCol.AxisText, ImGuiColors.DalamudGrey);
+            ImPlot.PushStyleColor(ImPlotCol.Line, new Vector4(0.82f, 0.86f, 0.94f, 1f));
+            ImPlot.PushStyleColor(ImPlotCol.Border, new Vector4(color.X, color.Y, color.Z, 0.45f));
+
+            if (ImPlot.BeginPlot("##bst-ladder", size, plotFlags))
+            {
+                ImPlot.SetupAxes("parse", "pDPS", axisFlags, axisFlags);
+                ImPlot.SetupAxisLimits(ImAxis.X1, 0, 100, ImPlotCond.Always);
+                ImPlot.SetupAxisLimits(ImAxis.Y1, 0, yMax, ImPlotCond.Always);
+
+                if (ladder.Length >= 2)
+                {
+                    var xs = stackalloc double[ladder.Length];
+                    var ys = stackalloc double[ladder.Length];
+                    for (var i = 0; i < ladder.Length; i++)
+                    {
+                        xs[i] = ladder[i].Percentile;
+                        ys[i] = ladder[i].Dps;
+                    }
+
+                    ImPlot.SetNextLineStyle(new Vector4(0.78f, 0.84f, 0.94f, 0.95f), 2.2f);
+                    ImPlot.PlotLine("ladder", xs, ys, ladder.Length);
+                }
+
+                if (snap.Percentile is int percentile && snap.Dps > 0)
+                {
+                    var x = (double)percentile;
+                    var y = snap.Dps;
+                    ImPlot.SetNextLineStyle(color, 1.6f);
+                    ImPlot.PlotInfLines("you", &x, 1);
+                    ImPlot.SetNextMarkerStyle(ImPlotMarker.Circle, 8f, color, 1.5f, new Vector4(0.04f, 0.045f, 0.06f, 1f));
+                    ImPlot.PlotScatter("score", &x, &y, 1);
+                }
+
+                ImPlot.EndPlot();
+            }
+
+            ImPlot.PopStyleColor(5);
+        }
+
+        private static void Icon(IFontHandle font, FontAwesomeIcon icon, Vector4 color)
+        {
+            using (font.Push())
+                ImGui.TextColored(color, icon.ToIconString());
+        }
+
+        private static Vector4 Band(int? percentile)
+        {
+            if (percentile is not int value)
+                return ImGuiColors.DalamudGrey2;
+
+            if (value >= 100)
+                return ImGuiColors.ParsedGold;
+            if (value >= 99)
+                return ImGuiColors.ParsedPink;
+            if (value >= 95)
+                return ImGuiColors.ParsedOrange;
+            if (value >= 75)
+                return ImGuiColors.ParsedPurple;
+            if (value >= 50)
+                return ImGuiColors.ParsedBlue;
+            if (value >= 25)
+                return ImGuiColors.ParsedGreen;
+            return ImGuiColors.ParsedGrey;
         }
 
         private static string Status(ParseSnapshot snap)
@@ -119,9 +197,9 @@ namespace BardSongTracker.Windows
                 return Short(snap.Note);
 
             if (snap.InPull)
-                return snap.Percentile is null ? "In pull    No ranking for this fight" : "In pull";
+                return snap.Percentile is null ? "In pull  ·  no ranking for this fight" : "In pull";
 
-            return snap.Percentile is null ? "Pull locked    No ranking for this fight" : "Pull locked";
+            return snap.Percentile is null ? "Pull locked  ·  no ranking for this fight" : "Pull locked";
         }
 
         private static string Short(string note)
@@ -136,7 +214,7 @@ namespace BardSongTracker.Windows
                 return "Waiting for the ACT log";
             if (note.Contains("No percentile", StringComparison.OrdinalIgnoreCase))
                 return "No ranking for this fight";
-            return note.Length > 48 ? note[..45] + "..." : note;
+            return note.Length > 64 ? note[..61] + "..." : note;
         }
 
         private static string Clock(TimeSpan duration)
@@ -157,14 +235,6 @@ namespace BardSongTracker.Windows
             }
 
             return jobId.ToString();
-        }
-
-        private static float Width(string text, float size, float fontSize)
-        {
-            if (fontSize <= 0f)
-                return 0f;
-
-            return ImGui.CalcTextSize(text).X * (size / fontSize);
         }
     }
 }
