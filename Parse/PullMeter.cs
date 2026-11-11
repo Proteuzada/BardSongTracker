@@ -63,7 +63,7 @@ namespace BardSongTracker.Parse
             else if (HasDamage())
                 duration = lockedDuration;
 
-            var seconds = Math.Max(duration.TotalSeconds, 0);
+            var seconds = Math.Max(duration.TotalSeconds, 1);
             long total = 0;
             foreach (var actor in actors.Values)
             {
@@ -77,7 +77,7 @@ namespace BardSongTracker.Parse
                 if (actor.Damage <= 0)
                     continue;
 
-                var dps = seconds >= 1 ? actor.Damage / seconds : 0;
+                var dps = actor.Damage / seconds;
                 var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
                 rows.Add(new MeterRow(
                     actor.Name.Length == 0 ? "Player" : actor.Name,
@@ -172,7 +172,8 @@ namespace BardSongTracker.Parse
 
             var when = clock;
             if (fields.Length > 1
-                && DateTimeOffset.TryParse(fields[1], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var stamped))
+                && DateTimeOffset.TryParse(fields[1], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var stamped)
+                && (stamped - clock).Duration() < TimeSpan.FromMinutes(5))
             {
                 when = stamped;
             }
