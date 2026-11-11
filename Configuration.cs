@@ -29,6 +29,11 @@ namespace BardSongTracker
         public bool ShowDotTimer { get; set; } = true;
         public float DotAlertThreshold { get; set; } = 5.0f;
 
+        public bool ShowParseOverlay { get; set; } = true;
+        public string ActLogDirectory { get; set; } = "";
+        public string RankingsPath { get; set; } = "";
+        public float PullIdleSeconds { get; set; } = 25f;
+
         /// <summary>
         /// Skill ids the player turned off. Missing ids stay enabled, so new skills
         /// show up without wiping an old config.

@@ -16,6 +16,10 @@ namespace BardSongTracker.Windows
         private readonly DotTracker dotTracker;
         private readonly SoundAlert soundAlert;
         private readonly Func<uint?> currentJobId;
+        private readonly Action? onParseSettingsChanged;
+        private string actLogDraft = "";
+        private string rankingsDraft = "";
+        private bool parseDraftReady;
 
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
@@ -27,7 +31,8 @@ namespace BardSongTracker.Windows
             SongTracker songTracker,
             DotTracker dotTracker,
             SoundAlert soundAlert,
-            Func<uint?> currentJobId) : base("Bard Song Tracker")
+            Func<uint?> currentJobId,
+            Action? onParseSettingsChanged = null) : base("Bard Song Tracker")
         {
             this.Size = new Vector2(920, 700);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -42,6 +47,7 @@ namespace BardSongTracker.Windows
             this.dotTracker = dotTracker;
             this.soundAlert = soundAlert;
             this.currentJobId = currentJobId;
+            this.onParseSettingsChanged = onParseSettingsChanged;
         }
 
         public void Dispose() { }
@@ -72,6 +78,13 @@ namespace BardSongTracker.Windows
             {
                 ImGui.Spacing();
                 DrawDots();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Parse"))
+            {
+                ImGui.Spacing();
+                DrawParse();
                 ImGui.EndTabItem();
             }
 
@@ -155,6 +168,58 @@ namespace BardSongTracker.Windows
                 soundAlert.PlayAlert(0f, ignoreCooldown: true);
             ImGui.Spacing();
             ImGui.TextDisabled("This volume only affects the plugin. It does not change the game volume.");
+            EndPanel();
+        }
+
+        private void DrawParse()
+        {
+            if (!parseDraftReady)
+            {
+                actLogDraft = configuration.ActLogDirectory ?? "";
+                rankingsDraft = configuration.RankingsPath ?? "";
+                parseDraftReady = true;
+            }
+
+            BeginPanel("bst-parse", new Vector2(0f, 0f));
+            PanelTitle("Live parse");
+            ImGui.TextWrapped("FFLogs caches the DPS of each percentile, then places a score by linear interpolation between the two nearest values. A score halfway between the 95% and 99% marks is a 97. This overlay does that interpolation.");
+            ImGui.Spacing();
+            Checkbox("Show the parse overlay", configuration.ShowParseOverlay, value =>
+            {
+                configuration.ShowParseOverlay = value;
+                onParseSettingsChanged?.Invoke();
+            });
+            ImGui.Spacing();
+
+            ImGui.Text("ACT network log folder");
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.InputText("##act-log", ref actLogDraft, 260))
+            {
+                configuration.ActLogDirectory = actLogDraft.Trim();
+                configuration.Save();
+                onParseSettingsChanged?.Invoke();
+            }
+            ImGui.TextDisabled("Leave this empty to try the usual Advanced Combat Tracker\\FFXIVLogs folders. The file is Network_*.log.");
+            ImGui.Spacing();
+
+            ImGui.Text("Ranking table");
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.InputText("##rankings", ref rankingsDraft, 260))
+            {
+                configuration.RankingsPath = rankingsDraft.Trim();
+                configuration.Save();
+                onParseSettingsChanged?.Invoke();
+            }
+            ImGui.TextWrapped("JSON file of percentile DPS values for each zone and job. The number on the overlay is your personal damage divided by the length of the pull. Put pDPS marks in the file. rDPS also moves buff damage between players, and this log total does not.");
+            ImGui.Spacing();
+
+            var idle = configuration.PullIdleSeconds;
+            LabeledSlider("Seconds of silence before a pull locks", "##pull-idle", ref idle, 5f, 120f, "%.0f s", value =>
+            {
+                configuration.PullIdleSeconds = value;
+                configuration.Save();
+                onParseSettingsChanged?.Invoke();
+            });
             EndPanel();
         }
 

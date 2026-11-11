@@ -1,0 +1,19 @@
+{
+  "encounters": [
+    {
+      "zoneId": "31F",
+      "zoneName": "Alphascape (V2.0)",
+      "job": "BRD",
+      "percentiles": [
+        { "percentile": 0, "dps": 4000 },
+        { "percentile": 25, "dps": 8000 },
+        { "percentile": 50, "dps": 11000 },
+        { "percentile": 75, "dps": 13000 },
+        { "percentile": 90, "dps": 14500 },
+        { "percentile": 95, "dps": 15500 },
+        { "percentile": 99, "dps": 17000 },
+        { "percentile": 100, "dps": 18000 }
+      ]
+    }
+  ]
+}

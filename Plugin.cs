@@ -5,6 +5,7 @@ using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Interface.Windowing;
+using BardSongTracker.Parse;
 using BardSongTracker.Windows;
 using System;
 
@@ -28,6 +29,8 @@ namespace BardSongTracker
 
         private ConfigWindow ConfigWindow { get; init; }
         private OverlayWindow OverlayWindow { get; init; }
+        private ParseOverlayWindow ParseOverlay { get; init; }
+        private ActLogFollower ActLog { get; init; }
 
         private SongTracker SongTracker { get; init; }
         private DotTracker DotTracker { get; init; }
@@ -61,15 +64,24 @@ namespace BardSongTracker
             SoundAlert.SetVolume(Configuration.SoundVolume);
             SoundAlert.SetSound(Configuration.AlertSoundId);
 
-            ConfigWindow = new ConfigWindow(Configuration, SongTracker, DotTracker, SoundAlert, CurrentJobId);
+            ActLog = new ActLogFollower();
+            ActLog.Configure(
+                Configuration.ShowParseOverlay,
+                Configuration.ActLogDirectory,
+                Configuration.RankingsPath,
+                Configuration.PullIdleSeconds);
+
+            ConfigWindow = new ConfigWindow(Configuration, SongTracker, DotTracker, SoundAlert, CurrentJobId, ApplyParseSettings);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
+            ParseOverlay = new ParseOverlayWindow(Configuration, ActLog);
 
             WindowSystem.AddWindow(ConfigWindow);
             WindowSystem.AddWindow(OverlayWindow);
+            WindowSystem.AddWindow(ParseOverlay);
 
             CommandManager.AddHandler("/bst", new CommandInfo(OnCommand)
             {
-                HelpMessage = "Open the BardSongTracker menu (songs and DoTs)."
+                HelpMessage = "Open the BardSongTracker menu (songs, DoTs, and parse)."
             });
 
             PluginInterface.UiBuilder.Draw += DrawUI;
@@ -78,6 +90,15 @@ namespace BardSongTracker
             Framework.Update += OnFrameworkUpdate;
 
             PluginLog.Info("BardSongTracker loaded successfully!");
+        }
+
+        private void ApplyParseSettings()
+        {
+            ActLog.Configure(
+                Configuration.ShowParseOverlay,
+                Configuration.ActLogDirectory,
+                Configuration.RankingsPath,
+                Configuration.PullIdleSeconds);
         }
 
         private uint? CurrentJobId()
@@ -154,6 +175,8 @@ namespace BardSongTracker
             WindowSystem.RemoveAllWindows();
             ConfigWindow.Dispose();
             OverlayWindow.Dispose();
+            ParseOverlay.Dispose();
+            ActLog.Dispose();
             SoundAlert.Dispose();
 
             PluginLog.Info("BardSongTracker unloaded.");
