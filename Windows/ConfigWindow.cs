@@ -1,6 +1,3 @@
-using Dalamud.Interface;
-using Dalamud.Interface.Colors;
-using Dalamud.Interface.Components;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.JobGauge.Enums;
@@ -22,7 +19,6 @@ namespace BardSongTracker.Windows
         private readonly Func<uint?> currentJobId;
         private readonly Action? onParseSettingsChanged;
         private readonly Func<ParseSnapshot>? parseSnapshot;
-        private readonly IUiBuilder? ui;
         private string actLogDraft = "";
         private string rankingsDraft = "";
         private bool parseDraftReady;
@@ -39,8 +35,7 @@ namespace BardSongTracker.Windows
             SoundAlert soundAlert,
             Func<uint?> currentJobId,
             Action? onParseSettingsChanged = null,
-            Func<ParseSnapshot>? parseSnapshot = null,
-            IUiBuilder? ui = null) : base("Bard Song Tracker")
+            Func<ParseSnapshot>? parseSnapshot = null) : base("Bard Song Tracker")
         {
             this.Size = new Vector2(920, 700);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -57,7 +52,6 @@ namespace BardSongTracker.Windows
             this.currentJobId = currentJobId;
             this.onParseSettingsChanged = onParseSettingsChanged;
             this.parseSnapshot = parseSnapshot;
-            this.ui = ui;
         }
 
         public void Dispose() { }
@@ -190,112 +184,43 @@ namespace BardSongTracker.Windows
                 parseDraftReady = true;
             }
 
-            PanelTitle("This pull");
-            if (ui != null)
-                ParseHud.Draw(parseSnapshot?.Invoke() ?? default, ui);
-            ImGui.Spacing();
-            ImGui.TextDisabled("Name, damage, and time stay on the left. The percentile stays on the right. Drag the overlay in game to move it.");
-            ImGui.Spacing();
-
-            var avail = ImGui.GetContentRegionAvail();
-            const float gap = 12f;
-            var column = Math.Max(220f, (avail.X - gap) / 2f);
-
-            BeginPanel("bst-parse-overlay", new Vector2(column, 188f));
-            PanelTitle("Overlay");
             Checkbox("Show the parse overlay", configuration.ShowParseOverlay, value =>
             {
                 configuration.ShowParseOverlay = value;
                 onParseSettingsChanged?.Invoke();
             });
             ImGui.Spacing();
-            ImGui.TextWrapped("ACT has to stay open and keep writing the network log. This meter does not copy the DPS number from the ACT window.");
-            EndPanel();
+            ParseHud.Draw(parseSnapshot?.Invoke() ?? default);
+            ImGui.Spacing();
 
-            ImGui.SameLine(0f, gap);
-
-            BeginPanel("bst-parse-log", new Vector2(column, 188f));
-            PanelTitle("ACT log");
-            ImGui.Text("Folder");
-            ImGui.SameLine();
-            ImGuiComponents.HelpMarker("Leave this empty to use the usual Advanced Combat Tracker\\FFXIVLogs folders. ACT has to stay open and write Network_*.log. The meter does not copy the DPS number from the ACT window.");
-            ImGui.SetNextItemWidth(-1f);
+            ImGui.Text("ACT log folder");
+            ImGui.SetNextItemWidth(Math.Min(520f, ImGui.GetContentRegionAvail().X));
             if (ImGui.InputText("##act-log", ref actLogDraft, 520))
             {
                 configuration.ActLogDirectory = actLogDraft.Trim();
                 configuration.Save();
                 onParseSettingsChanged?.Invoke();
             }
-            ImGui.TextDisabled("Empty uses Advanced Combat Tracker\\FFXIVLogs. The file is Network_*.log.");
-            EndPanel();
 
-            ImGui.Spacing();
-
-            BeginPanel("bst-parse-rank", new Vector2(0f, 280f));
-            PanelTitle("Ranking table");
-            ImGui.Text("JSON file");
-            ImGui.SameLine();
-            ImGuiComponents.HelpMarker("Percentile DPS for each zone and job. The curve on the overlay is this table. A score halfway between the 95 and 99 marks is a 97. Use pDPS marks. rDPS also moves buff damage between players, and this total does not.");
-            ImGui.SetNextItemWidth(-1f);
+            ImGui.Text("Ranking table");
+            ImGui.SetNextItemWidth(Math.Min(520f, ImGui.GetContentRegionAvail().X));
             if (ImGui.InputText("##rankings", ref rankingsDraft, 520))
             {
                 configuration.RankingsPath = rankingsDraft.Trim();
                 configuration.Save();
                 onParseSettingsChanged?.Invoke();
             }
-            ImGui.TextWrapped("Percentile DPS for each zone and job. A score halfway between the 95 and 99 marks is a 97. Put pDPS values in the file. rDPS also moves buff damage between players, and this total does not.");
-            ImGui.Spacing();
-            DrawParseLegend();
-            ImGui.Spacing();
+
             var idle = configuration.PullIdleSeconds;
-            LabeledSlider("Silence before the pull locks", "##pull-idle", ref idle, 5f, 120f, "%.0f s", value =>
+            var idleWidth = Math.Min(360f, ImGui.GetContentRegionAvail().X);
+            ImGui.Text("Silence before the pull locks");
+            ImGui.SetNextItemWidth(idleWidth);
+            if (ImGui.SliderFloat("##pull-idle", ref idle, 5f, 120f, "%.0f s"))
             {
-                configuration.PullIdleSeconds = value;
+                configuration.PullIdleSeconds = idle;
                 configuration.Save();
                 onParseSettingsChanged?.Invoke();
-            });
-            EndPanel();
-        }
-
-        private static void DrawParseLegend()
-        {
-            (string Label, Vector4 Color, bool DarkText)[] bands =
-            [
-                ("100", ImGuiColors.ParsedGold, true),
-                ("99", ImGuiColors.ParsedPink, false),
-                ("95", ImGuiColors.ParsedOrange, true),
-                ("75", ImGuiColors.ParsedPurple, false),
-                ("50", ImGuiColors.ParsedBlue, false),
-                ("25", ImGuiColors.ParsedGreen, true),
-                ("0", ImGuiColors.ParsedGrey, false),
-            ];
-
-            var origin = ImGui.GetCursorScreenPos();
-            var font = ImGui.GetFont();
-            var fontSize = ImGui.GetFontSize();
-            var drawList = ImGui.GetWindowDrawList();
-            var x = origin.X;
-            const float height = 22f;
-            foreach (var band in bands)
-            {
-                var width = Math.Max(34f, ImGui.CalcTextSize(band.Label).X + 16f);
-                var min = new Vector2(x, origin.Y);
-                var max = new Vector2(x + width, origin.Y + height);
-                drawList.AddRectFilled(min, max, ImGui.ColorConvertFloat4ToU32(band.Color), 4f, ImDrawFlags.RoundCornersAll);
-                var text = band.DarkText
-                    ? new Vector4(0.08f, 0.08f, 0.08f, 1f)
-                    : new Vector4(0.98f, 0.98f, 0.98f, 1f);
-                var textWidth = ImGui.CalcTextSize(band.Label).X;
-                drawList.AddText(
-                    font,
-                    fontSize,
-                    new Vector2(x + ((width - textWidth) * 0.5f), origin.Y + ((height - fontSize) * 0.5f)),
-                    ImGui.ColorConvertFloat4ToU32(text),
-                    band.Label);
-                x += width + 6f;
             }
-
-            ImGui.Dummy(new Vector2(Math.Max(1f, x - origin.X), height));
         }
 
         private void DrawBard()
