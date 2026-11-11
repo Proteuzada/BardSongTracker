@@ -26,6 +26,12 @@ namespace BardSongTracker.Parse
         private string token = "";
         private DateTimeOffset tokenUntil;
         private int fetching;
+        private int probing;
+        private int clientState;
+        private string clientLine = "API client not set.";
+        private string checkedId = "";
+        private string checkedSecret = "";
+        private DateTimeOffset clientRetry;
         private string status = "Add an FF Logs API client on the Logs tab. The parse stays blank until the curve for this boss is loaded.";
         private string attemptKey = "";
         private DateTimeOffset retryAfter;
@@ -47,10 +53,49 @@ namespace BardSongTracker.Parse
             }
         }
 
+        public int ClientState
+        {
+            get
+            {
+                lock (gate)
+                    return clientState;
+            }
+        }
+
+        public string ClientLine
+        {
+            get
+            {
+                lock (gate)
+                    return clientLine;
+            }
+        }
+
+        public string MeterLink
+        {
+            get
+            {
+                lock (gate)
+                {
+                    if (clientState == 0)
+                        return "FF Logs client not set";
+                    if (clientState == 1)
+                        return "Checking FF Logs…";
+                    if (clientState == 3)
+                        return "FF Logs client rejected";
+                    if (status.StartsWith("Parse curve loaded", StringComparison.Ordinal))
+                        return "FF Logs connected";
+
+                    return "FF Logs connected · parse pending";
+                }
+            }
+        }
+
         public void Consider(ParseSnapshot snap, string? clientId, string? clientSecret)
         {
             var id = clientId?.Trim() ?? "";
             var secret = clientSecret?.Trim() ?? "";
+            EnsureClient(id, secret);
             if (id.Length == 0 || secret.Length == 0)
             {
                 SetStatus("Add an FF Logs API client on the Logs tab. The parse stays blank until the curve for this boss is loaded.");
@@ -105,6 +150,7 @@ namespace BardSongTracker.Parse
             try
             {
                 var access = await Token(clientId, clientSecret);
+                MarkConnected();
                 var encounter = await FindEncounter(access, zone, boss);
                 if (encounter == 0)
                 {
@@ -150,6 +196,9 @@ namespace BardSongTracker.Parse
             }
             catch (Exception ex)
             {
+                if (IsClientRejection(ex.Message))
+                    SetClient(3, ex.Message);
+
                 attemptKey = key;
                 retryAfter = DateTimeOffset.UtcNow.AddMinutes(2);
                 SetStatus(ex.Message);
@@ -157,6 +206,128 @@ namespace BardSongTracker.Parse
             finally
             {
                 Interlocked.Exchange(ref fetching, 0);
+            }
+        }
+
+        private void EnsureClient(string id, string secret)
+        {
+            var start = false;
+            lock (gate)
+            {
+                if (id.Length == 0 || secret.Length == 0)
+                {
+                    checkedId = "";
+                    checkedSecret = "";
+                    token = "";
+                    tokenUntil = default;
+                    clientState = 0;
+                    clientLine = "API client not set.";
+                    return;
+                }
+
+                if (id == checkedId && secret == checkedSecret && clientState == 1)
+                    return;
+                if (id == checkedId && secret == checkedSecret && clientState == 3 && DateTimeOffset.UtcNow < clientRetry)
+                    return;
+                if (id == checkedId && secret == checkedSecret && clientState == 2 && DateTimeOffset.UtcNow < tokenUntil)
+                    return;
+
+                checkedId = id;
+                checkedSecret = secret;
+                token = "";
+                tokenUntil = default;
+                clientState = 1;
+                clientLine = "Checking the API client...";
+                start = probing == 0;
+                if (start)
+                    probing = 1;
+            }
+
+            if (start)
+                Task.Run(Probe);
+        }
+
+        private async Task Probe()
+        {
+            try
+            {
+                string id;
+                string secret;
+                lock (gate)
+                {
+                    id = checkedId;
+                    secret = checkedSecret;
+                }
+
+                if (id.Length == 0 || secret.Length == 0)
+                    return;
+
+                await Token(id, secret);
+                lock (gate)
+                {
+                    if (id != checkedId || secret != checkedSecret)
+                        return;
+
+                    clientState = 2;
+                    clientLine = "API client connected.";
+                    if (status.StartsWith("Add an FF Logs", StringComparison.Ordinal) || status.StartsWith("Checking", StringComparison.Ordinal))
+                        status = "API client connected. The parse fills in during a ranked fight.";
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (gate)
+                {
+                    clientState = 3;
+                    clientLine = ex.Message;
+                    clientRetry = DateTimeOffset.UtcNow.AddMinutes(2);
+                    status = ex.Message;
+                }
+            }
+            finally
+            {
+                var again = false;
+                lock (gate)
+                {
+                    probing = 0;
+                    again = clientState == 1 && checkedId.Length > 0 && checkedSecret.Length > 0;
+                    if (again)
+                        probing = 1;
+                }
+
+                if (again)
+                    _ = Probe();
+            }
+        }
+
+        private void MarkConnected()
+        {
+            lock (gate)
+            {
+                if (checkedId.Length == 0)
+                    return;
+
+                clientState = 2;
+                clientLine = "API client connected.";
+                if (status.StartsWith("Add an FF Logs", StringComparison.Ordinal) || status.StartsWith("Checking", StringComparison.Ordinal))
+                    status = "API client connected. The parse fills in during a ranked fight.";
+            }
+        }
+
+        private static bool IsClientRejection(string message)
+        {
+            return message.Contains("API client", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("access token", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void SetClient(int state, string line)
+        {
+            lock (gate)
+            {
+                clientState = state;
+                clientLine = line;
+                if (state == 3)
+                    clientRetry = DateTimeOffset.UtcNow.AddMinutes(2);
             }
         }
 

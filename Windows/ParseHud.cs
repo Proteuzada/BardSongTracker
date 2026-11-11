@@ -27,10 +27,10 @@ namespace BardSongTracker.Windows
             if (!columns.Abbreviate)
                 width += 36f * scale;
 
-            return new Vector2(width, 12f + top + (14f * scale) + extra + (15f * scale * rows));
+            return new Vector2(width, 12f + top + (14f * scale) + extra + (15f * scale * rows) + (14f * scale));
         }
 
-        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou, float meterScale, ITextureProvider textures, MeterColumns columns)
+        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou, float meterScale, ITextureProvider textures, MeterColumns columns, int linkState, string linkText)
         {
             if (size.X < 8f || size.Y < 8f)
                 return;
@@ -71,12 +71,14 @@ namespace BardSongTracker.Windows
                 {
                     selectedName = null;
                     DrawNote(snap.Note, top + header + 2f, size.X);
+                    DrawLink(linkText, linkState, size);
                     return;
                 }
 
                 var y = top + header + 2f;
                 var shown = 0;
-                var reserve = columns.HitDetails && selectedName != null ? 16f * scale : 0f;
+                var linkH = 14f * scale;
+                var reserve = (columns.HitDetails && selectedName != null ? 16f * scale : 0f) + linkH;
                 string? clicked = null;
                 foreach (var row in rows)
                 {
@@ -117,6 +119,8 @@ namespace BardSongTracker.Windows
                     DrawNote(onlyYou ? "Waiting for your damage." : snap.Note, top + header + 2f, size.X);
                 else if (detail is { } chosen)
                     DrawDetail(chosen, y, size.X, fontSize, columns.Abbreviate);
+
+                DrawLink(linkText, linkState, size);
             }
             finally
             {
@@ -170,6 +174,26 @@ namespace BardSongTracker.Windows
             var marker = "Last pull";
             var markerX = origin.X + 8f + dpsCol + 8f;
             drawList.AddText(font, fontSize, new Vector2(markerX, textY), muted, marker);
+        }
+
+        private static void DrawLink(string text, int state, Vector2 size)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            var font = ImGui.GetFont();
+            var fontSize = ImGui.GetFontSize();
+            var origin = ImGui.GetCursorScreenPos();
+            var color = state switch
+            {
+                2 => new Vector4(0.45f, 0.86f, 0.55f, 1f),
+                1 => new Vector4(1f, 0.78f, 0.45f, 1f),
+                3 => new Vector4(1f, 0.55f, 0.45f, 1f),
+                _ => new Vector4(0.68f, 0.72f, 0.78f, 1f),
+            };
+            var ink = ImGui.ColorConvertFloat4ToU32(color);
+            var y = origin.Y + Math.Max(0f, size.Y - fontSize - 2f);
+            ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X + 8f, y), ink, Fit(text, size.X - 16f, fontSize));
         }
 
         private static void DrawNote(string note, float y, float width)

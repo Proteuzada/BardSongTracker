@@ -20,6 +20,8 @@ namespace BardSongTracker.Windows
         private readonly Func<uint?> currentJobId;
         private readonly Action? onParseSettingsChanged;
         private readonly Func<string>? rankingStatus;
+        private readonly Func<int>? clientState;
+        private readonly Func<string>? clientLine;
 
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
@@ -38,7 +40,9 @@ namespace BardSongTracker.Windows
             SoundAlert soundAlert,
             Func<uint?> currentJobId,
             Action? onParseSettingsChanged = null,
-            Func<string>? rankingStatus = null) : base("Bard Song Tracker")
+            Func<string>? rankingStatus = null,
+            Func<int>? clientState = null,
+            Func<string>? clientLine = null) : base("Bard Song Tracker")
         {
             this.Size = new Vector2(920, 760);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -55,6 +59,8 @@ namespace BardSongTracker.Windows
             this.currentJobId = currentJobId;
             this.onParseSettingsChanged = onParseSettingsChanged;
             this.rankingStatus = rankingStatus;
+            this.clientState = clientState;
+            this.clientLine = clientLine;
         }
 
         public void Dispose() { }
@@ -618,7 +624,7 @@ namespace BardSongTracker.Windows
                 logFolderReady = true;
             }
 
-            BeginPanel("bst-card-logs", new Vector2(0f, 520f));
+            BeginPanel("bst-card-logs", new Vector2(0f, 560f));
             PanelTitle("ACT logs");
             ImGui.TextWrapped("The meter reads the newest Network log. Leave the folder empty to use the usual ACT or IINACT folder, or choose the folder that contains Network_*.log.");
             ImGui.Spacing();
@@ -685,8 +691,22 @@ namespace BardSongTracker.Windows
             if (ImGui.IsItemDeactivatedAfterEdit())
                 SaveFflogs();
 
+            var state = clientState?.Invoke() ?? 0;
+            var line = clientLine?.Invoke();
+            if (string.IsNullOrWhiteSpace(line))
+                line = "API client not set.";
+
+            var color = state switch
+            {
+                2 => new Vector4(0.45f, 0.86f, 0.55f, 1f),
+                1 => new Vector4(1f, 0.78f, 0.45f, 1f),
+                3 => new Vector4(1f, 0.55f, 0.45f, 1f),
+                _ => new Vector4(0.68f, 0.72f, 0.78f, 1f),
+            };
+            ImGui.TextColored(color, line);
+
             var ranking = rankingStatus?.Invoke();
-            if (!string.IsNullOrWhiteSpace(ranking))
+            if (!string.IsNullOrWhiteSpace(ranking) && !string.Equals(ranking, line, StringComparison.Ordinal))
                 ImGui.TextWrapped(ranking);
 
             EndPanel();

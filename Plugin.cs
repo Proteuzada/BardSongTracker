@@ -81,9 +81,11 @@ namespace BardSongTracker
                 SoundAlert,
                 CurrentJobId,
                 ApplyParseSettings,
-                () => Rankings.Status);
+                () => Rankings.Status,
+                () => Rankings.ClientState,
+                () => Rankings.ClientLine);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
-            ParseOverlay = new ParseOverlayWindow(Configuration, ActLog, TextureProvider);
+            ParseOverlay = new ParseOverlayWindow(Configuration, ActLog, TextureProvider, () => Rankings.ClientState, () => Rankings.MeterLink);
 
             WindowSystem.AddWindow(ConfigWindow);
             WindowSystem.AddWindow(OverlayWindow);

@@ -12,8 +12,15 @@ namespace BardSongTracker.Windows
         private readonly Configuration configuration;
         private readonly ActLogFollower follower;
         private readonly ITextureProvider textures;
+        private readonly Func<int> linkState;
+        private readonly Func<string> linkText;
 
-        public ParseOverlayWindow(Configuration configuration, ActLogFollower follower, ITextureProvider textures) : base(
+        public ParseOverlayWindow(
+            Configuration configuration,
+            ActLogFollower follower,
+            ITextureProvider textures,
+            Func<int> linkState,
+            Func<string> linkText) : base(
             "BardSongTrackerParse",
             ImGuiWindowFlags.NoTitleBar |
             ImGuiWindowFlags.NoFocusOnAppearing |
@@ -32,6 +39,8 @@ namespace BardSongTracker.Windows
             this.configuration = configuration;
             this.follower = follower;
             this.textures = textures;
+            this.linkState = linkState;
+            this.linkText = linkText;
         }
 
         public void Dispose() { }
@@ -88,7 +97,9 @@ namespace BardSongTracker.Windows
                 configuration.ShowOnlyMyMeter,
                 configuration.MeterScale,
                 textures,
-                columns);
+                columns,
+                linkState(),
+                linkText());
         }
 
         private MeterColumns Columns()
