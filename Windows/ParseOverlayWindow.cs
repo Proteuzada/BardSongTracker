@@ -44,6 +44,12 @@ namespace BardSongTracker.Windows
             var x = viewport.WorkPos.X + 24f;
             var y = viewport.WorkPos.Y + (viewport.WorkSize.Y * 0.28f);
             ImGui.SetNextWindowPos(new Vector2(x, y), ImGuiCond.FirstUseEver);
+            var minimum = ParseHud.MinimumSize(configuration.MeterScale, configuration.ShowOnlyMyMeter);
+            this.SizeConstraints = new WindowSizeConstraints
+            {
+                MinimumSize = minimum,
+                MaximumSize = new Vector2(1200, 900),
+            };
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6f, 4f));
             ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 6f);
             ImGui.PushStyleColor(ImGuiCol.ResizeGrip, new Vector4(1f, 1f, 1f, 0.45f));
@@ -57,7 +63,13 @@ namespace BardSongTracker.Windows
 
         public override void Draw()
         {
-            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail(), configuration.ShowOnlyMyMeter);
+            var minimum = ParseHud.MinimumSize(configuration.MeterScale, configuration.ShowOnlyMyMeter);
+            var height = ImGui.GetWindowHeight();
+            var width = ImGui.GetWindowWidth();
+            if (height < minimum.Y - 1f || width < minimum.X - 1f)
+                ImGui.SetWindowSize(new Vector2(Math.Max(width, minimum.X), Math.Max(height, minimum.Y)));
+
+            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail(), configuration.ShowOnlyMyMeter, configuration.MeterScale);
         }
     }
 }

@@ -10,21 +10,28 @@ namespace BardSongTracker.Windows
     {
         private static readonly Vector4 Gold = new(0.90f, 0.80f, 0.50f, 1f);
 
-        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou = false)
+        public static Vector2 MinimumSize(float meterScale, bool onlyYou)
+        {
+            var scale = ClampScale(meterScale);
+            var rows = onlyYou ? 1 : 8;
+            return new Vector2(200f * Math.Clamp(scale, 1f, 1.6f), 12f + (14f * scale) + (15f * scale * rows));
+        }
+
+        public static void Draw(ParseSnapshot snap, Vector2 size, bool onlyYou = false, float meterScale = 1f)
         {
             if (size.X < 8f || size.Y < 8f)
                 return;
 
             var rows = snap.Rows ?? Array.Empty<MeterRow>();
-            var header = 14f;
-            var body = Math.Max(8f, size.Y - header - 2f);
-            var rowH = Math.Min(15f, body / 8f);
-            var fontSize = Math.Clamp(rowH * 0.72f, 10f, 12f);
-            var nameSize = Math.Clamp(fontSize * 0.78f, 9f, 10f);
+            var scale = ClampScale(meterScale);
+            var header = 14f * scale;
+            var rowH = 15f * scale;
+            var fontSize = 11f * scale;
+            var nameSize = 9.5f * scale;
             var baseSize = ImGui.GetFontSize();
-            var scale = baseSize <= 0f ? 1f : fontSize / baseSize;
+            var fontScale = baseSize <= 0f ? 1f : fontSize / baseSize;
 
-            ImGui.SetWindowFontScale(scale);
+            ImGui.SetWindowFontScale(fontScale);
             try
             {
                 var dpsCol = Math.Max(ImGui.CalcTextSize("rDPS").X, ImGui.CalcTextSize("999k").X);
@@ -50,7 +57,7 @@ namespace BardSongTracker.Windows
                     if (shown >= 8 || y + rowH > size.Y + 1f)
                         break;
 
-                    DrawRow(row, y, size.X, Math.Max(10f, rowH - 2f), dpsCol, parseCol, top, nameSize);
+                    DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, top, nameSize);
                     y += rowH;
                     shown++;
                 }
@@ -127,6 +134,11 @@ namespace BardSongTracker.Windows
             drawList.AddText(font, fontSize, new Vector2(dpsX, textY), numberColor, dpsText);
             drawList.AddText(font, nameSize, new Vector2(nameX, nameY), nameColor, Fit(FirstName(row.Name), nameWidth, nameSize));
             drawList.AddText(font, fontSize, new Vector2(parseX + parseCol - ImGui.CalcTextSize(parseText).X, textY), packed, parseText);
+        }
+
+        private static float ClampScale(float meterScale)
+        {
+            return Math.Clamp(meterScale, 0.8f, 2.5f);
         }
 
         private static string Thousands(double value)

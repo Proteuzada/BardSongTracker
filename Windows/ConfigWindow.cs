@@ -113,7 +113,7 @@ namespace BardSongTracker.Windows
             const float gap = 12f;
             var column = Math.Max(220f, (avail.X - gap) / 2f);
 
-            BeginPanel("bst-card-overlay", new Vector2(column, 470f));
+            BeginPanel("bst-card-overlay", new Vector2(column, 540f));
             PanelTitle("Overlay");
             ImGui.TextWrapped("Show the Bard song and the current job's damage-over-time effects.");
             ImGui.Spacing();
@@ -125,7 +125,14 @@ namespace BardSongTracker.Windows
             });
             Checkbox("Show only me", configuration.ShowOnlyMyMeter, value => configuration.ShowOnlyMyMeter = value);
             ImGui.TextDisabled("Hides the other players. Your rDPS and parse stay on the meter.");
-            ImGui.TextDisabled("Drag a corner of the meter to resize it. Damage comes from the usual ACT log folder.");
+            ImGui.TextDisabled("Drag a corner of the meter to resize the window. Damage comes from the usual ACT log folder.");
+            ImGui.Spacing();
+            var meterScale = configuration.MeterScale;
+            LabeledSlider("Meter scale", "##meter-scale", ref meterScale, 0.8f, 2.5f, "%.1f", value =>
+            {
+                configuration.MeterScale = value;
+                configuration.Save();
+            });
             ImGui.Spacing();
             var scale = configuration.OverlayScale;
             LabeledSlider("Overlay scale", "##overlay-scale", ref scale, 0.6f, 3.0f, "%.1f", value =>
@@ -137,7 +144,7 @@ namespace BardSongTracker.Windows
 
             ImGui.SameLine(0f, gap);
 
-            BeginPanel("bst-card-sound", new Vector2(column, 470f));
+            BeginPanel("bst-card-sound", new Vector2(column, 540f));
             PanelTitle("Sound");
             ImGui.TextWrapped("Play a sound when a song or a DoT reaches its alert threshold.");
             ImGui.Spacing();
