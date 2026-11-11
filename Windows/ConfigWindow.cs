@@ -597,6 +597,7 @@ namespace BardSongTracker.Windows
             ImGui.Spacing();
             Checkbox("Keep the last pull after a wipe", configuration.KeepLastPull, value => configuration.KeepLastPull = value);
             ImGui.TextDisabled("A kill keeps the live numbers and stops the clock. A boss that leaves the arena does not.");
+            ImGui.TextDisabled("Time spent dead lowers that player's parse. The clock keeps running while they are not hitting.");
             EndPanel();
         }
 

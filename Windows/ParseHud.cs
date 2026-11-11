@@ -75,15 +75,6 @@ namespace BardSongTracker.Windows
                     return;
                 }
 
-                var topByRole = new Dictionary<CombatRole, double>();
-                foreach (var row in rows)
-                {
-                    var role = FightRole(row.JobId);
-                    topByRole.TryGetValue(role, out var current);
-                    if (row.Dps > current)
-                        topByRole[role] = row.Dps;
-                }
-
                 var y = top + header + 2f;
                 var shown = 0;
                 var reserve = columns.HitDetails && selectedName != null ? 16f * scale : 0f;
@@ -95,8 +86,8 @@ namespace BardSongTracker.Windows
                     if (shown >= 8 || y + rowH > size.Y - reserve + 1f)
                         break;
 
-                    var roleTop = topByRole.TryGetValue(FightRole(row.JobId), out var best) ? best : 0d;
-                    if (DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, shareCol, deathCol, roleTop, nameSize, textures, columns))
+                    var raw = RoleParse(row, rows, snap.Duration.TotalSeconds);
+                    if (DrawRow(row, y, size.X, Math.Max(10f, rowH - Math.Max(2f, 2f * scale)), dpsCol, parseCol, shareCol, deathCol, raw, nameSize, textures, columns))
                         clicked = row.Name;
 
                     y += rowH;
@@ -193,14 +184,13 @@ namespace BardSongTracker.Windows
             ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X, origin.Y + y), muted, Fit(text, width, fontSize));
         }
 
-        private static bool DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, float shareCol, float deathCol, double top, float nameSize, ITextureProvider textures, MeterColumns columns)
+        private static bool DrawRow(MeterRow row, float y, float width, float rowH, float dpsCol, float parseCol, float shareCol, float deathCol, int raw, float nameSize, ITextureProvider textures, MeterColumns columns)
         {
             var font = ImGui.GetFont();
             var fontSize = ImGui.GetFontSize();
             var origin = ImGui.GetCursorScreenPos();
             var drawList = ImGui.GetWindowDrawList();
-            var raw = top <= 0 || row.Dps <= 0 ? 0 : (int)Math.Clamp(Math.Floor(row.Dps * 100d / top), 0, 100);
-            var parse = HoldParse(row.Name, raw);
+            var parse = HoldParse(row.Name, raw, row.TimeDead >= 1d);
             var color = PercentileScale.Color(parse);
             var min = origin + new Vector2(0f, y);
             var max = origin + new Vector2(width, y + rowH);
@@ -295,13 +285,36 @@ namespace BardSongTracker.Windows
             return Math.Clamp(meterScale, 0.8f, 2.5f);
         }
 
-        private static int HoldParse(string name, int raw)
+        private static int RoleParse(MeterRow row, MeterRow[] rows, double duration)
+        {
+            if (duration <= 0 || row.Dps <= 0)
+                return 0;
+
+            var role = FightRole(row.JobId);
+            var cleanBest = 0d;
+            foreach (var other in rows)
+            {
+                if (FightRole(other.JobId) != role || other.TimeDead >= 1d)
+                    continue;
+                if (other.Dps > cleanBest)
+                    cleanBest = other.Dps;
+            }
+
+            var pace = row.AliveSeconds > 0.5 ? row.Damage / row.AliveSeconds : row.Dps;
+            var reference = row.TimeDead >= 1d ? Math.Max(cleanBest, pace) : Math.Max(cleanBest, row.Dps);
+            if (reference <= 0)
+                return 0;
+
+            return (int)Math.Clamp(Math.Floor(row.Dps / reference * 100d), 0, 100);
+        }
+
+        private static int HoldParse(string name, int raw, bool steadyDrop)
         {
             var key = string.IsNullOrWhiteSpace(name) ? "Player" : name;
             seenParse.Add(key);
             if (!heldParse.TryGetValue(key, out var held))
                 held = raw;
-            else if (raw > held || held - raw >= 2)
+            else if (raw > held || steadyDrop || held - raw >= 2)
                 held = raw;
 
             heldParse[key] = held;

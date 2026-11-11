@@ -56,6 +56,9 @@ namespace BardSongTracker.Parse
                 case "12":
                     ApplyLocalJob(fields);
                     break;
+                case "20":
+                    NoteCast(fields, clock);
+                    break;
                 case "21":
                 case "22":
                     ApplyAbility(fields, clock);
@@ -74,6 +77,7 @@ namespace BardSongTracker.Parse
                     break;
                 case "261":
                     RememberJob(fields);
+                    NoteHealth(fields, clock);
                     ApplyCombatantMemory(fields);
                     break;
             }
@@ -231,6 +235,9 @@ namespace BardSongTracker.Parse
             var targetId = fields[6];
             var ownerIndex = ActFields.AbilityIndex("ownerId");
             var ownerId = ownerIndex >= 0 && ownerIndex < fields.Length ? fields[ownerIndex] : "";
+            var when = Stamp(fields, clock);
+            if (IsPlayer(sourceId) && AnimationLock(fields) > 0.05)
+                Revive(sourceId, when);
             if (IsLimitBreak(sourceId) || IsPlayerOrEmpty(targetId))
                 return;
 
@@ -238,7 +245,6 @@ namespace BardSongTracker.Parse
             if (creditId.Length == 0)
                 return;
 
-            var when = Stamp(fields, clock);
 
             long hit = 0;
             var swings = 0;
@@ -323,6 +329,8 @@ namespace BardSongTracker.Parse
                 playerDied = true;
                 var actor = GetOrAdd(fields[2]);
                 actor.Deaths++;
+                if (actor.DeadSince == null)
+                    actor.DeadSince = Stamp(fields, clock);
                 if (fields.Length > 3 && fields[3].Length > 0)
                     actor.Name = fields[3];
                 return;
@@ -524,9 +532,73 @@ namespace BardSongTracker.Parse
                 actor.Crits = 0;
                 actor.Directs = 0;
                 actor.Deaths = 0;
+                actor.TimeDead = 0;
+                actor.DeadSince = null;
                 actor.MaxHit = 0;
                 actor.MaxHitName = "";
             }
+        }
+
+        private void NoteCast(string[] fields, DateTimeOffset clock)
+        {
+            if (fields.Length < 3 || !IsPlayer(fields[2]))
+                return;
+
+            Revive(fields[2], Stamp(fields, clock));
+        }
+
+        private void NoteHealth(string[] fields, DateTimeOffset clock)
+        {
+            if (fields.Length < 6 || !IsPlayer(fields[3]))
+                return;
+
+            for (var i = 4; i + 1 < fields.Length; i += 2)
+            {
+                if (!fields[i].Equals("CurrentHP", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (ParseLong(fields[i + 1]) is > 0)
+                    Revive(fields[3], Stamp(fields, clock));
+                return;
+            }
+        }
+
+        private void Revive(string id, DateTimeOffset when)
+        {
+            if (!actors.TryGetValue(id, out var actor) || actor.DeadSince is not DateTimeOffset since)
+                return;
+
+            var end = when > since ? when : since;
+            actor.TimeDead += (end - since).TotalSeconds;
+            actor.DeadSince = null;
+        }
+
+        private void DownTime(Actor actor, TimeSpan duration, out double alive, out double dead)
+        {
+            var span = Math.Max(duration.TotalSeconds, 0);
+            dead = actor.TimeDead;
+            if (actor.DeadSince is DateTimeOffset since)
+            {
+                var end = pullStart + duration;
+                var from = since < pullStart ? pullStart : since;
+                if (end > from)
+                    dead += (end - from).TotalSeconds;
+            }
+
+            if (dead < 0)
+                dead = 0;
+            if (dead > span)
+                dead = span;
+            alive = Math.Max(span - dead, 0);
+        }
+
+        private static double AnimationLock(string[] fields)
+        {
+            var index = ActFields.AbilityIndex("animationLockTime");
+            if (index < 0 || index >= fields.Length)
+                return 0;
+
+            return double.TryParse(fields[index], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : 0;
         }
 
         private void ResetPull(bool archive = true)
@@ -605,6 +677,7 @@ namespace BardSongTracker.Parse
 
                 var dps = actor.Damage / seconds;
                 var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
+                DownTime(actor, duration, out var alive, out var dead);
                 rows.Add(new MeterRow(
                     actor.Name.Length == 0 ? "Player" : actor.Name,
                     actor.JobId,
@@ -617,7 +690,9 @@ namespace BardSongTracker.Parse
                     actor.Crits,
                     actor.Directs,
                     actor.MaxHit,
-                    actor.MaxHitName));
+                    actor.MaxHitName,
+                    alive,
+                    dead));
             }
 
             rows.Sort(static (left, right) => right.Damage.CompareTo(left.Damage));
@@ -683,6 +758,8 @@ namespace BardSongTracker.Parse
             public int Crits;
             public int Directs;
             public int Deaths;
+            public double TimeDead;
+            public DateTimeOffset? DeadSince;
             public long MaxHit;
             public string MaxHitName = "";
         }
@@ -702,7 +779,9 @@ namespace BardSongTracker.Parse
         int Crits,
         int Directs,
         long MaxHit,
-        string MaxHitName);
+        string MaxHitName,
+        double AliveSeconds,
+        double TimeDead);
 
     public readonly record struct ParseSnapshot(
         bool Watching,
