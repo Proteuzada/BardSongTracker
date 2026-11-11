@@ -47,7 +47,12 @@ namespace BardSongTracker.Windows
             var x = viewport.WorkPos.X + 24f;
             var y = viewport.WorkPos.Y + (viewport.WorkSize.Y * 0.28f);
             ImGui.SetNextWindowPos(new Vector2(x, y), ImGuiCond.FirstUseEver);
-            var minimum = ParseHud.MinimumSize(configuration.MeterScale, configuration.ShowOnlyMyMeter);
+            var columns = Columns();
+            var minimum = ParseHud.MinimumSize(
+                configuration.MeterScale,
+                configuration.ShowOnlyMyMeter,
+                columns,
+                ParseHud.DetailOpen && columns.HitDetails);
             this.SizeConstraints = new WindowSizeConstraints
             {
                 MinimumSize = minimum,
@@ -66,13 +71,34 @@ namespace BardSongTracker.Windows
 
         public override void Draw()
         {
-            var minimum = ParseHud.MinimumSize(configuration.MeterScale, configuration.ShowOnlyMyMeter);
+            var columns = Columns();
+            var minimum = ParseHud.MinimumSize(
+                configuration.MeterScale,
+                configuration.ShowOnlyMyMeter,
+                columns,
+                ParseHud.DetailOpen && columns.HitDetails);
             var height = ImGui.GetWindowHeight();
             var width = ImGui.GetWindowWidth();
             if (height < minimum.Y - 1f || width < minimum.X - 1f)
                 ImGui.SetWindowSize(new Vector2(Math.Max(width, minimum.X), Math.Max(height, minimum.Y)));
 
-            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail(), configuration.ShowOnlyMyMeter, configuration.MeterScale, textures);
+            ParseHud.Draw(
+                follower.Snapshot(configuration.KeepLastPull),
+                ImGui.GetContentRegionAvail(),
+                configuration.ShowOnlyMyMeter,
+                configuration.MeterScale,
+                textures,
+                columns);
+        }
+
+        private MeterColumns Columns()
+        {
+            var extra = !configuration.MeterMinimal;
+            return new MeterColumns(
+                extra && configuration.ShowDamagePercent,
+                extra && configuration.ShowDeaths,
+                extra && configuration.ShowEncounterLine,
+                extra && configuration.ShowHitDetails);
         }
     }
 }

@@ -35,13 +35,13 @@ namespace BardSongTracker.Parse
                 EnsureStarted();
         }
 
-        public ParseSnapshot Snapshot()
+        public ParseSnapshot Snapshot(bool keepLastPull)
         {
             lock (gate)
             {
                 var clock = DateTimeOffset.Now;
                 meter.Advance(clock, idleSeconds);
-                return meter.Snapshot(clock, logFile, error);
+                return meter.Snapshot(clock, logFile, error, keepLastPull);
             }
         }
 

@@ -2,9 +2,10 @@
 
 Dalamud plugin that tracks Bard songs and damage-over-time effects for tanks, healers, and DPS. The overlay shows the time remaining, and a sound plays when an effect reaches the alert threshold. In-game command: `/bst`.
 
-The menu has four tabs:
+The menu has five tabs:
 
-- **General** — overlay, damage meter, only-me meter, volume, and sound test
+- **General** — song and DoT overlay, volume, and sound test
+- **Meter** — damage meter window, and which columns to show
 - **Logs** — ACT or IINACT network log folder
 - **Bard** — thresholds for Mage's Ballad, Army's Paeon, and The Wanderer's Minuet
 - **DoTs** — role and job filters, search, and a toggle for each skill
@@ -19,7 +20,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 ## Live parse
 
-The damage meter tails the newest `Network_*.log`. An empty Logs tab uses the usual Advanced Combat Tracker or IINACT folder. Choose another folder there when the logs are stored somewhere else. The header only names the columns. Each row is a thin strip with that player's rDPS, job icon, and a smaller first name, and their parse beside it. rDPS is shown in thousands, such as 12k or 40k, so the digits stay still. Eight players fit in the meter. The parse compares that rDPS with the highest rDPS of the same FF Logs role: tank, healer, melee, ranged, or caster. The leader of each role is 100. A boss leaving and returning to the arena keeps the pull going. Pet damage is added to the owner. The meter clears on a wipe, and when a monster drops aggro without dying, including a striking dummy reset from the right-click menu. A kill keeps the numbers up. Drag any corner of the meter to resize it. Show or hide it from the General tab. Meter scale changes the size of the rows, names, and numbers. Show only me leaves your row and hides the rest. Your parse still compares your rDPS with the highest rDPS of your role. Overlay scale changes the song and DoT overlay only.
+The damage meter tails the newest `Network_*.log`. An empty Logs tab uses the usual Advanced Combat Tracker or IINACT folder. Choose another folder there when the logs are stored somewhere else. The Meter tab shows or hides the overlay. Only rDPS and parse leaves each row as rDPS, the job icon, the first name, and the parse. The other checkboxes add damage percent, a death count after someone dies, the fight time and zone above the columns, and a click on a row for crit rate, direct hit rate, and the biggest hit. Keep the last pull leaves those numbers up after a wipe until the next pull. rDPS is shown in thousands, such as 12k or 40k. Eight players fit. The parse compares that rDPS with the highest rDPS of the same role: tank, healer, melee, ranged, or caster. The leader of each role is 100. A boss leaving and returning to the arena keeps the pull going. Pet damage is added to the owner. The meter clears on a wipe, and when a monster drops aggro without dying, including a striking dummy reset from the right-click menu, unless the last pull is kept. A kill keeps the numbers and stops the clock. Drag any corner of the meter to resize it. Meter scale changes the size of the rows, names, and numbers. Show only me leaves your row and hides the rest. Your parse still compares your rDPS with the highest rDPS of your role. Overlay scale on the General tab changes the song and DoT overlay only.
 
 ## Install from Dalamud, without compiling
 

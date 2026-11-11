@@ -18,12 +18,15 @@ namespace BardSongTracker.Parse
         private readonly HashSet<string> vanished = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> enemyMaxHp = new(StringComparer.OrdinalIgnoreCase);
         private bool playerDied;
+        private bool pullSealed;
+        private bool combatIdle;
         private string playerId = "";
         private string zoneName = "";
         private bool inPull;
         private DateTimeOffset pullStart;
         private DateTimeOffset lastEvent;
         private TimeSpan lockedDuration;
+        private ParseSnapshot? lastPull;
 
         public void Apply(string line, DateTimeOffset clock)
         {
@@ -58,7 +61,7 @@ namespace BardSongTracker.Parse
                     ApplyAbility(fields, clock);
                     break;
                 case "25":
-                    ApplyDeath(fields);
+                    ApplyDeath(fields, clock);
                     break;
                 case "33":
                     ApplyDirector(fields);
@@ -118,7 +121,7 @@ namespace BardSongTracker.Parse
             inPull = false;
         }
 
-        public ParseSnapshot Snapshot(DateTimeOffset clock, string? logFile, string? error)
+        public ParseSnapshot Snapshot(DateTimeOffset clock, string? logFile, string? error, bool keepLast)
         {
             var duration = TimeSpan.Zero;
             if (inPull)
@@ -126,49 +129,19 @@ namespace BardSongTracker.Parse
             else if (HasDamage())
                 duration = lockedDuration;
 
-            var seconds = Math.Max(duration.TotalSeconds, 1);
-            long total = 0;
-            foreach (var actor in actors.Values)
-            {
-                if (actor.Damage > 0)
-                    total += actor.Damage;
-            }
-
-            var rows = new List<MeterRow>();
-            foreach (var actor in actors.Values)
-            {
-                if (actor.Damage <= 0)
-                    continue;
-
-                var dps = actor.Damage / seconds;
-                var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
-                rows.Add(new MeterRow(
-                    actor.Name.Length == 0 ? "Player" : actor.Name,
-                    actor.JobId,
-                    actor.Damage,
-                    dps,
-                    share,
-                    SameActor(actor.Id, playerId)));
-            }
-
-            rows.Sort(static (left, right) => right.Damage.CompareTo(left.Damage));
-
             var note = "";
             if (!string.IsNullOrEmpty(error))
                 note = error;
-            else if (rows.Count == 0 && string.IsNullOrEmpty(logFile))
+            else if (!HasDamage() && string.IsNullOrEmpty(logFile))
                 note = "Waiting for an ACT network log.";
-            else if (rows.Count == 0)
+            else if (!HasDamage())
                 note = "Waiting for a pull.";
 
-            return new ParseSnapshot(
-                !string.IsNullOrEmpty(logFile),
-                logFile,
-                zoneName,
-                inPull,
-                duration,
-                rows.ToArray(),
-                note);
+            var live = Build(duration, note, false, logFile, error);
+            if (live.Rows.Length == 0 && keepLast && string.IsNullOrEmpty(error) && lastPull is { Rows.Length: > 0 } saved)
+                return saved with { Watching = live.Watching, LogFile = logFile };
+
+            return live;
         }
 
         private bool HasDamage()
@@ -187,8 +160,9 @@ namespace BardSongTracker.Parse
             if (fields.Length < 4)
                 return;
 
+            Archive();
             zoneName = fields[3];
-            ResetPull();
+            ResetPull(archive: false);
         }
 
         private void ApplyPlayer(string[] fields)
@@ -264,15 +238,13 @@ namespace BardSongTracker.Parse
             if (creditId.Length == 0)
                 return;
 
-            var when = clock;
-            if (fields.Length > 1
-                && DateTimeOffset.TryParse(fields[1], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var stamped)
-                && (stamped - clock).Duration() < TimeSpan.FromMinutes(5))
-            {
-                when = stamped;
-            }
+            var when = Stamp(fields, clock);
 
             long hit = 0;
+            var swings = 0;
+            var crits = 0;
+            var directs = 0;
+            long biggest = 0;
             for (var pair = 0; pair < 8; pair++)
             {
                 var flagsIndex = 8 + (pair * 2);
@@ -286,22 +258,38 @@ namespace BardSongTracker.Parse
                     continue;
 
                 var amount = DamageCodec.Amount(raw);
-                if (amount > 0)
-                    hit += amount;
+                if (amount <= 0)
+                    continue;
+
+                hit += amount;
+                swings++;
+                var mark = (flags >> 8) & 0x60;
+                if ((mark & 0x20) != 0)
+                    crits++;
+                if ((mark & 0x40) != 0)
+                    directs++;
+                if (amount > biggest)
+                    biggest = amount;
             }
 
             if (hit <= 0)
                 return;
 
-            if (!inPull)
+            // A tick on a corpse stays on the finished kill. The next living enemy,
+            // after combat has dropped, starts a new pull. A phase resume keeps this one.
+            var lateOnCorpse = pullSealed && killedEnemies.Contains(targetId);
+            if (!lateOnCorpse && (!inPull || (pullSealed && combatIdle)))
             {
-                if (!HasDamage())
+                var fresh = !HasDamage() || (pullSealed && combatIdle);
+                if (fresh)
                 {
+                    ClearDamage();
                     ClearEncounter();
                     pullStart = when;
                 }
 
                 inPull = true;
+                pullSealed = false;
                 lockedDuration = TimeSpan.Zero;
             }
 
@@ -310,20 +298,42 @@ namespace BardSongTracker.Parse
                 credit.Name = CreditName(fields, creditId, sourceId);
 
             credit.Damage += hit;
-            lastEvent = when;
+            credit.Hits += swings;
+            credit.Crits += crits;
+            credit.Directs += directs;
+            if (biggest > credit.MaxHit)
+            {
+                credit.MaxHit = biggest;
+                credit.MaxHitName = fields.Length > 5 ? fields[5] : "";
+            }
+
+            if (!pullSealed)
+                lastEvent = when;
             if (IsEnemy(targetId))
                 damagedEnemies.Add(targetId);
         }
 
-        private void ApplyDeath(string[] fields)
+        private void ApplyDeath(string[] fields, DateTimeOffset clock)
         {
             if (fields.Length < 3)
                 return;
 
             if (IsPlayer(fields[2]))
+            {
                 playerDied = true;
-            else if (IsEnemy(fields[2]))
-                killedEnemies.Add(fields[2]);
+                var actor = GetOrAdd(fields[2]);
+                actor.Deaths++;
+                if (fields.Length > 3 && fields[3].Length > 0)
+                    actor.Name = fields[3];
+                return;
+            }
+
+            if (!IsEnemy(fields[2]))
+                return;
+
+            killedEnemies.Add(fields[2]);
+            if (!pullSealed && HasDamage() && AllDamagedDead())
+                Seal(Stamp(fields, clock));
         }
 
         private void ApplyDirector(string[] fields)
@@ -336,10 +346,20 @@ namespace BardSongTracker.Parse
 
         private void ApplyCombatState(string[] fields)
         {
-            if (fields.Length < 6 || fields[2] != "0" || fields[3] != "0" || fields[5] != "1")
+            if (fields.Length < 6)
                 return;
 
-            if (!HasDamage() || killedEnemies.Count > 0 || vanished.Count > 0 || !LivingEnemiesReset())
+            if (fields[2] != "0" || fields[3] != "0")
+            {
+                combatIdle = false;
+                return;
+            }
+
+            if (fields[5] != "1")
+                return;
+
+            combatIdle = true;
+            if (pullSealed || !HasDamage() || killedEnemies.Count > 0 || vanished.Count > 0 || !LivingEnemiesReset())
                 return;
 
             ResetPull();
@@ -498,14 +518,27 @@ namespace BardSongTracker.Parse
         private void ClearDamage()
         {
             foreach (var actor in actors.Values)
+            {
                 actor.Damage = 0;
+                actor.Hits = 0;
+                actor.Crits = 0;
+                actor.Directs = 0;
+                actor.Deaths = 0;
+                actor.MaxHit = 0;
+                actor.MaxHitName = "";
+            }
         }
 
-        private void ResetPull()
+        private void ResetPull(bool archive = true)
         {
+            if (archive)
+                Archive();
+
             ClearDamage();
             ClearEncounter();
             inPull = false;
+            pullSealed = false;
+            combatIdle = false;
             lockedDuration = TimeSpan.Zero;
         }
 
@@ -517,6 +550,99 @@ namespace BardSongTracker.Parse
             hpRestored.Clear();
             vanished.Clear();
             playerDied = false;
+            pullSealed = false;
+            combatIdle = false;
+        }
+
+        private void Archive()
+        {
+            if (!HasDamage())
+                return;
+
+            var duration = inPull
+                ? (lastEvent > pullStart ? lastEvent - pullStart : TimeSpan.Zero)
+                : lockedDuration;
+            lastPull = Build(duration, "Last pull", true, null, null);
+        }
+
+        private void Seal(DateTimeOffset when)
+        {
+            pullSealed = true;
+            inPull = false;
+            var end = when > pullStart ? when : lastEvent;
+            lockedDuration = end > pullStart ? end - pullStart : TimeSpan.Zero;
+        }
+
+        private bool AllDamagedDead()
+        {
+            if (damagedEnemies.Count == 0)
+                return false;
+
+            foreach (var id in damagedEnemies)
+            {
+                if (!killedEnemies.Contains(id))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private ParseSnapshot Build(TimeSpan duration, string note, bool lastPull, string? logFile, string? error)
+        {
+            var seconds = Math.Max(duration.TotalSeconds, 1);
+            long total = 0;
+            foreach (var actor in actors.Values)
+            {
+                if (actor.Damage > 0)
+                    total += actor.Damage;
+            }
+
+            var rows = new List<MeterRow>();
+            foreach (var actor in actors.Values)
+            {
+                if (actor.Damage <= 0)
+                    continue;
+
+                var dps = actor.Damage / seconds;
+                var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
+                rows.Add(new MeterRow(
+                    actor.Name.Length == 0 ? "Player" : actor.Name,
+                    actor.JobId,
+                    actor.Damage,
+                    dps,
+                    share,
+                    SameActor(actor.Id, playerId),
+                    actor.Deaths,
+                    actor.Hits,
+                    actor.Crits,
+                    actor.Directs,
+                    actor.MaxHit,
+                    actor.MaxHitName));
+            }
+
+            rows.Sort(static (left, right) => right.Damage.CompareTo(left.Damage));
+            if (!string.IsNullOrEmpty(error))
+                note = error;
+
+            return new ParseSnapshot(
+                !string.IsNullOrEmpty(logFile),
+                logFile,
+                zoneName,
+                inPull && !lastPull,
+                duration,
+                rows.ToArray(),
+                note,
+                lastPull);
+        }
+
+        private static DateTimeOffset Stamp(string[] fields, DateTimeOffset clock)
+        {
+            if (fields.Length > 1
+                && DateTimeOffset.TryParse(fields[1], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var stamped)
+                && (stamped - clock).Duration() < TimeSpan.FromMinutes(5))
+                return stamped;
+
+            return clock;
         }
 
         private static bool IsEnemy(string id)
@@ -553,8 +679,16 @@ namespace BardSongTracker.Parse
             public string Name = "";
             public int JobId;
             public long Damage;
+            public int Hits;
+            public int Crits;
+            public int Directs;
+            public int Deaths;
+            public long MaxHit;
+            public string MaxHitName = "";
         }
     }
+
+    public readonly record struct MeterColumns(bool DamagePercent, bool Deaths, bool Encounter, bool HitDetails);
 
     public readonly record struct MeterRow(
         string Name,
@@ -562,7 +696,13 @@ namespace BardSongTracker.Parse
         long Damage,
         double Dps,
         float Share,
-        bool You);
+        bool You,
+        int Deaths,
+        int Hits,
+        int Crits,
+        int Directs,
+        long MaxHit,
+        string MaxHitName);
 
     public readonly record struct ParseSnapshot(
         bool Watching,
@@ -571,5 +711,6 @@ namespace BardSongTracker.Parse
         bool InPull,
         TimeSpan Duration,
         MeterRow[] Rows,
-        string Note);
+        string Note,
+        bool LastPull);
 }

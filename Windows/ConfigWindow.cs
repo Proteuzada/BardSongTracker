@@ -68,6 +68,13 @@ namespace BardSongTracker.Windows
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Meter"))
+            {
+                ImGui.Spacing();
+                DrawMeter();
+                ImGui.EndTabItem();
+            }
+
             if (ImGui.BeginTabItem("Logs"))
             {
                 ImGui.Spacing();
@@ -129,21 +136,7 @@ namespace BardSongTracker.Windows
             ImGui.TextWrapped("Show the Bard song and the current job's damage-over-time effects.");
             ImGui.Spacing();
             Checkbox("Show overlay", configuration.ShowOverlay, value => configuration.ShowOverlay = value);
-            Checkbox("Show the damage meter", configuration.ShowParseOverlay, value =>
-            {
-                configuration.ShowParseOverlay = value;
-                onParseSettingsChanged?.Invoke();
-            });
-            Checkbox("Show only me", configuration.ShowOnlyMyMeter, value => configuration.ShowOnlyMyMeter = value);
-            ImGui.TextDisabled("Hides the other players. Your rDPS and parse stay on the meter.");
-            ImGui.TextDisabled("Drag a corner of the meter to resize the window. Choose the ACT log folder in the Logs tab.");
-            ImGui.Spacing();
-            var meterScale = configuration.MeterScale;
-            LabeledSlider("Meter scale", "##meter-scale", ref meterScale, 0.8f, 2.5f, "%.1f", value =>
-            {
-                configuration.MeterScale = value;
-                configuration.Save();
-            });
+            ImGui.TextDisabled("The damage meter has its own Meter tab.");
             ImGui.Spacing();
             var scale = configuration.OverlayScale;
             LabeledSlider("Overlay scale", "##overlay-scale", ref scale, 0.6f, 3.0f, "%.1f", value =>
@@ -557,6 +550,54 @@ namespace BardSongTracker.Windows
             }
 
             return string.Join(", ", labels);
+        }
+
+        private void DrawMeter()
+        {
+            var avail = ImGui.GetContentRegionAvail();
+            const float gap = 12f;
+            var column = Math.Max(220f, (avail.X - gap) / 2f);
+
+            BeginPanel("bst-card-meter", new Vector2(column, 540f));
+            PanelTitle("Window");
+            ImGui.TextWrapped("The meter sits on its own overlay. Drag a corner to resize it. The log folder is on the Logs tab.");
+            ImGui.Spacing();
+            Checkbox("Show the damage meter", configuration.ShowParseOverlay, value =>
+            {
+                configuration.ShowParseOverlay = value;
+                onParseSettingsChanged?.Invoke();
+            });
+            Checkbox("Show only me", configuration.ShowOnlyMyMeter, value => configuration.ShowOnlyMyMeter = value);
+            ImGui.TextDisabled("Hides the other players. Your rDPS and parse stay on the meter.");
+            ImGui.Spacing();
+            var meterScale = configuration.MeterScale;
+            LabeledSlider("Meter scale", "##meter-scale", ref meterScale, 0.8f, 2.5f, "%.1f", value =>
+            {
+                configuration.MeterScale = value;
+                configuration.Save();
+            });
+            EndPanel();
+
+            ImGui.SameLine(0f, gap);
+
+            BeginPanel("bst-card-meter-rows", new Vector2(column, 540f));
+            PanelTitle("Rows");
+            ImGui.TextWrapped("Leave the row as rDPS and parse, or turn on the extra columns.");
+            ImGui.Spacing();
+            Checkbox("Only rDPS and parse", configuration.MeterMinimal, value => configuration.MeterMinimal = value);
+            ImGui.Spacing();
+            ImGui.BeginDisabled(configuration.MeterMinimal);
+            Checkbox("Damage percent", configuration.ShowDamagePercent, value => configuration.ShowDamagePercent = value);
+            Checkbox("Deaths", configuration.ShowDeaths, value => configuration.ShowDeaths = value);
+            ImGui.TextDisabled("The count shows beside a name only after that player dies.");
+            Checkbox("Fight time and zone", configuration.ShowEncounterLine, value => configuration.ShowEncounterLine = value);
+            Checkbox("Crit, direct hit, and biggest hit", configuration.ShowHitDetails, value => configuration.ShowHitDetails = value);
+            ImGui.TextDisabled("Click a row to open that player's crit rate, direct hit rate, and biggest hit.");
+            ImGui.EndDisabled();
+            ImGui.Spacing();
+            Checkbox("Keep the last pull after a wipe", configuration.KeepLastPull, value => configuration.KeepLastPull = value);
+            ImGui.TextDisabled("A kill keeps the live numbers and stops the clock. A boss that leaves the arena does not.");
+            EndPanel();
         }
 
         private void DrawLogs()

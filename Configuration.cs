@@ -32,6 +32,12 @@ namespace BardSongTracker
         public bool ShowParseOverlay { get; set; } = true;
         public bool ShowOnlyMyMeter { get; set; } = false;
         public float MeterScale { get; set; } = 1f;
+        public bool MeterMinimal { get; set; } = false;
+        public bool ShowDamagePercent { get; set; } = true;
+        public bool ShowDeaths { get; set; } = true;
+        public bool ShowEncounterLine { get; set; } = true;
+        public bool ShowHitDetails { get; set; } = true;
+        public bool KeepLastPull { get; set; } = true;
         public string ActLogDirectory { get; set; } = "";
         public string RankingsPath { get; set; } = "";
         public float PullIdleSeconds { get; set; } = 25f;
