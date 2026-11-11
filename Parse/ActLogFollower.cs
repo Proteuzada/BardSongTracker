@@ -15,22 +15,20 @@ namespace BardSongTracker.Parse
         private readonly PullMeter meter = new();
         private Thread? thread;
         private CancellationTokenSource? cts;
-        private RankingTable rankings = new();
         private string directory = "";
         private string? logFile;
         private string? error;
         private double idleSeconds = 25;
         private bool enabled;
 
-        public void Configure(bool watch, string? logDirectory, string? rankingsPath, float idle)
+        public void Configure(bool watch, float idle)
         {
             lock (gate)
             {
                 enabled = watch;
-                directory = logDirectory?.Trim() ?? "";
+                directory = "";
                 idleSeconds = idle < 5 ? 25 : idle;
-                rankings = RankingTable.Load(rankingsPath);
-                error = rankings.Error;
+                error = null;
             }
 
             if (watch)
@@ -43,7 +41,7 @@ namespace BardSongTracker.Parse
             {
                 var clock = DateTimeOffset.Now;
                 meter.Advance(clock, idleSeconds);
-                return meter.Snapshot(clock, rankings, logFile, error);
+                return meter.Snapshot(clock, logFile, error);
             }
         }
 
@@ -105,7 +103,7 @@ namespace BardSongTracker.Parse
 
         private void Tail(string file, CancellationToken token)
         {
-            SetStatus(file, rankings.Error);
+            SetStatus(file, null);
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             stream.Seek(0, SeekOrigin.End);
             var pending = "";

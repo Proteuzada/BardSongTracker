@@ -1,7 +1,6 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.JobGauge.Enums;
-using BardSongTracker.Parse;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -18,10 +17,6 @@ namespace BardSongTracker.Windows
         private readonly SoundAlert soundAlert;
         private readonly Func<uint?> currentJobId;
         private readonly Action? onParseSettingsChanged;
-        private readonly Func<ParseSnapshot>? parseSnapshot;
-        private string actLogDraft = "";
-        private string rankingsDraft = "";
-        private bool parseDraftReady;
 
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
@@ -34,8 +29,7 @@ namespace BardSongTracker.Windows
             DotTracker dotTracker,
             SoundAlert soundAlert,
             Func<uint?> currentJobId,
-            Action? onParseSettingsChanged = null,
-            Func<ParseSnapshot>? parseSnapshot = null) : base("Bard Song Tracker")
+            Action? onParseSettingsChanged = null) : base("Bard Song Tracker")
         {
             this.Size = new Vector2(920, 700);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -51,7 +45,6 @@ namespace BardSongTracker.Windows
             this.soundAlert = soundAlert;
             this.currentJobId = currentJobId;
             this.onParseSettingsChanged = onParseSettingsChanged;
-            this.parseSnapshot = parseSnapshot;
         }
 
         public void Dispose() { }
@@ -82,13 +75,6 @@ namespace BardSongTracker.Windows
             {
                 ImGui.Spacing();
                 DrawDots();
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("Parse"))
-            {
-                ImGui.Spacing();
-                DrawParse();
                 ImGui.EndTabItem();
             }
 
@@ -127,11 +113,17 @@ namespace BardSongTracker.Windows
             const float gap = 12f;
             var column = Math.Max(220f, (avail.X - gap) / 2f);
 
-            BeginPanel("bst-card-overlay", new Vector2(column, 430f));
+            BeginPanel("bst-card-overlay", new Vector2(column, 470f));
             PanelTitle("Overlay");
             ImGui.TextWrapped("Show the Bard song and the current job's damage-over-time effects.");
             ImGui.Spacing();
             Checkbox("Show overlay", configuration.ShowOverlay, value => configuration.ShowOverlay = value);
+            Checkbox("Show the damage meter", configuration.ShowParseOverlay, value =>
+            {
+                configuration.ShowParseOverlay = value;
+                onParseSettingsChanged?.Invoke();
+            });
+            ImGui.TextDisabled("Drag a corner of the meter to resize it. Damage comes from the usual ACT log folder.");
             ImGui.Spacing();
             var scale = configuration.OverlayScale;
             LabeledSlider("Overlay scale", "##overlay-scale", ref scale, 0.6f, 3.0f, "%.1f", value =>
@@ -143,7 +135,7 @@ namespace BardSongTracker.Windows
 
             ImGui.SameLine(0f, gap);
 
-            BeginPanel("bst-card-sound", new Vector2(column, 430f));
+            BeginPanel("bst-card-sound", new Vector2(column, 470f));
             PanelTitle("Sound");
             ImGui.TextWrapped("Play a sound when a song or a DoT reaches its alert threshold.");
             ImGui.Spacing();
@@ -173,54 +165,6 @@ namespace BardSongTracker.Windows
             ImGui.Spacing();
             ImGui.TextDisabled("This volume only affects the plugin. It does not change the game volume.");
             EndPanel();
-        }
-
-        private void DrawParse()
-        {
-            if (!parseDraftReady)
-            {
-                actLogDraft = configuration.ActLogDirectory ?? "";
-                rankingsDraft = configuration.RankingsPath ?? "";
-                parseDraftReady = true;
-            }
-
-            Checkbox("Show the parse overlay", configuration.ShowParseOverlay, value =>
-            {
-                configuration.ShowParseOverlay = value;
-                onParseSettingsChanged?.Invoke();
-            });
-            ImGui.Spacing();
-            ParseHud.Draw(parseSnapshot?.Invoke() ?? default);
-            ImGui.Spacing();
-
-            ImGui.Text("ACT log folder");
-            ImGui.SetNextItemWidth(Math.Min(520f, ImGui.GetContentRegionAvail().X));
-            if (ImGui.InputText("##act-log", ref actLogDraft, 520))
-            {
-                configuration.ActLogDirectory = actLogDraft.Trim();
-                configuration.Save();
-                onParseSettingsChanged?.Invoke();
-            }
-
-            ImGui.Text("Ranking table");
-            ImGui.SetNextItemWidth(Math.Min(520f, ImGui.GetContentRegionAvail().X));
-            if (ImGui.InputText("##rankings", ref rankingsDraft, 520))
-            {
-                configuration.RankingsPath = rankingsDraft.Trim();
-                configuration.Save();
-                onParseSettingsChanged?.Invoke();
-            }
-
-            var idle = configuration.PullIdleSeconds;
-            var idleWidth = Math.Min(360f, ImGui.GetContentRegionAvail().X);
-            ImGui.Text("Silence before the pull locks");
-            ImGui.SetNextItemWidth(idleWidth);
-            if (ImGui.SliderFloat("##pull-idle", ref idle, 5f, 120f, "%.0f s"))
-            {
-                configuration.PullIdleSeconds = idle;
-                configuration.Save();
-                onParseSettingsChanged?.Invoke();
-            }
         }
 
         private void DrawBard()

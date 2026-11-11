@@ -65,11 +65,7 @@ namespace BardSongTracker
             SoundAlert.SetSound(Configuration.AlertSoundId);
 
             ActLog = new ActLogFollower();
-            ActLog.Configure(
-                Configuration.ShowParseOverlay,
-                Configuration.ActLogDirectory,
-                Configuration.RankingsPath,
-                Configuration.PullIdleSeconds);
+            ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds);
 
             ConfigWindow = new ConfigWindow(
                 Configuration,
@@ -77,8 +73,7 @@ namespace BardSongTracker
                 DotTracker,
                 SoundAlert,
                 CurrentJobId,
-                ApplyParseSettings,
-                () => ActLog.Snapshot());
+                ApplyParseSettings);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
             ParseOverlay = new ParseOverlayWindow(Configuration, ActLog);
 
@@ -101,11 +96,7 @@ namespace BardSongTracker
 
         private void ApplyParseSettings()
         {
-            ActLog.Configure(
-                Configuration.ShowParseOverlay,
-                Configuration.ActLogDirectory,
-                Configuration.RankingsPath,
-                Configuration.PullIdleSeconds);
+            ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds);
         }
 
         private uint? CurrentJobId()

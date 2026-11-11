@@ -14,16 +14,19 @@ namespace BardSongTracker.Windows
         public ParseOverlayWindow(Configuration configuration, ActLogFollower follower) : base(
             "BardSongTrackerParse",
             ImGuiWindowFlags.NoTitleBar |
-            ImGuiWindowFlags.NoBackground |
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse |
-            ImGuiWindowFlags.AlwaysAutoResize |
             ImGuiWindowFlags.NoFocusOnAppearing |
             ImGuiWindowFlags.NoNav)
         {
             this.IsOpen = true;
             this.RespectCloseHotkey = false;
-            this.SizeCondition = ImGuiCond.Always;
+            this.Size = new Vector2(360, 220);
+            this.SizeCondition = ImGuiCond.FirstUseEver;
+            this.SizeConstraints = new WindowSizeConstraints
+            {
+                MinimumSize = new Vector2(220, 72),
+                MaximumSize = new Vector2(1200, 900),
+            };
+            this.BgAlpha = 0.64f;
             this.configuration = configuration;
             this.follower = follower;
         }
@@ -38,22 +41,23 @@ namespace BardSongTracker.Windows
         public override void PreDraw()
         {
             var viewport = ImGui.GetMainViewport();
-            var x = viewport.WorkPos.X + 28f;
-            var y = viewport.WorkPos.Y + (viewport.WorkSize.Y * 0.32f);
+            var x = viewport.WorkPos.X + 24f;
+            var y = viewport.WorkPos.Y + (viewport.WorkSize.Y * 0.28f);
             ImGui.SetNextWindowPos(new Vector2(x, y), ImGuiCond.FirstUseEver);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8f, 6f));
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 6f);
+            ImGui.PushStyleColor(ImGuiCol.ResizeGrip, new Vector4(1f, 1f, 1f, 0.45f));
+        }
+
+        public override void PostDraw()
+        {
+            ImGui.PopStyleColor();
+            ImGui.PopStyleVar(2);
         }
 
         public override void Draw()
         {
-            ImGui.SetWindowFontScale(configuration.OverlayScale);
-            try
-            {
-                ParseHud.Draw(follower.Snapshot());
-            }
-            finally
-            {
-                ImGui.SetWindowFontScale(1f);
-            }
+            ParseHud.Draw(follower.Snapshot(), ImGui.GetContentRegionAvail());
         }
     }
 }

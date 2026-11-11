@@ -5,29 +5,18 @@ using System.Globalization;
 namespace BardSongTracker.Parse
 {
     /// <summary>
-    /// Running personal damage for the current pull. DPS is damage divided by the
-    /// length of the pull, which is the duration FFLogs uses before it turns a
-    /// score into a percentile.
+    /// Damage for every player in the current pull, read from the ACT network log.
+    /// Pet damage is added to the owner. The share is that player's part of the pull.
     /// </summary>
     public sealed class PullMeter
     {
+        private readonly Dictionary<string, Actor> actors = new(StringComparer.OrdinalIgnoreCase);
         private string playerId = "";
-        private string playerName = "";
-        private int jobId;
-        private string zoneId = "";
         private string zoneName = "";
         private bool inPull;
         private DateTimeOffset pullStart;
         private DateTimeOffset lastEvent;
-        private long damage;
         private TimeSpan lockedDuration;
-
-        public void ResetPull()
-        {
-            inPull = false;
-            damage = 0;
-            lockedDuration = TimeSpan.Zero;
-        }
 
         public void Apply(string line, DateTimeOffset clock)
         {
@@ -66,67 +55,68 @@ namespace BardSongTracker.Parse
             inPull = false;
         }
 
-        public ParseSnapshot Snapshot(DateTimeOffset clock, RankingTable? rankings, string? logFile, string? error)
+        public ParseSnapshot Snapshot(DateTimeOffset clock, string? logFile, string? error)
         {
             var duration = TimeSpan.Zero;
             if (inPull)
                 duration = clock > pullStart ? clock - pullStart : TimeSpan.Zero;
-            else if (damage > 0)
+            else if (HasDamage())
                 duration = lockedDuration;
 
             var seconds = Math.Max(duration.TotalSeconds, 0);
-            var dps = seconds >= 1 ? damage / seconds : 0;
-            int? percentile = null;
-            var ladder = Array.Empty<PercentileScale.Point>();
-            var note = "";
+            long total = 0;
+            foreach (var actor in actors.Values)
+            {
+                if (actor.Damage > 0)
+                    total += actor.Damage;
+            }
 
+            var rows = new List<MeterRow>();
+            foreach (var actor in actors.Values)
+            {
+                if (actor.Damage <= 0)
+                    continue;
+
+                var dps = seconds >= 1 ? actor.Damage / seconds : 0;
+                var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
+                rows.Add(new MeterRow(
+                    actor.Name.Length == 0 ? "Player" : actor.Name,
+                    actor.JobId,
+                    actor.Damage,
+                    dps,
+                    share,
+                    SameActor(actor.Id, playerId)));
+            }
+
+            rows.Sort(static (left, right) => right.Damage.CompareTo(left.Damage));
+
+            var note = "";
             if (!string.IsNullOrEmpty(error))
-            {
                 note = error;
-            }
-            else if (rankings != null && rankings.Error != null && rankings.Count == 0)
-            {
-                note = rankings.Error;
-            }
-            else if (damage > 0 && rankings != null && rankings.TryMatch(zoneId, zoneName, jobId, out var entry) && entry.Points.Count > 0)
-            {
-                percentile = PercentileScale.Interpolate(dps, entry.Points);
-                ladder = CopyLadder(entry.Points);
-                note = "Estimated from the ranking table.";
-            }
-            else if (damage > 0)
-            {
-                note = "No percentile table for this zone and job.";
-            }
-            else if (string.IsNullOrEmpty(logFile))
-            {
+            else if (rows.Count == 0 && string.IsNullOrEmpty(logFile))
                 note = "Waiting for an ACT network log.";
-            }
+            else if (rows.Count == 0)
+                note = "Waiting for a pull.";
 
             return new ParseSnapshot(
                 !string.IsNullOrEmpty(logFile),
                 logFile,
-                zoneId,
                 zoneName,
-                playerName,
-                jobId,
                 inPull,
                 duration,
-                damage,
-                dps,
-                percentile,
-                note,
-                ladder);
+                rows.ToArray(),
+                note);
         }
 
-        private static PercentileScale.Point[] CopyLadder(List<PercentileScale.Point> points)
+        private bool HasDamage()
         {
-            var copy = new PercentileScale.Point[points.Count];
-            for (var i = 0; i < points.Count; i++)
-                copy[i] = points[i];
+            foreach (var actor in actors.Values)
+            {
+                if (actor.Damage > 0)
+                    return true;
+            }
 
-            Array.Sort(copy, static (left, right) => left.Percentile.CompareTo(right.Percentile));
-            return copy;
+            return false;
         }
 
         private void ApplyZone(string[] fields)
@@ -134,9 +124,10 @@ namespace BardSongTracker.Parse
             if (fields.Length < 4)
                 return;
 
-            zoneId = fields[2];
             zoneName = fields[3];
-            ResetPull();
+            ClearDamage();
+            inPull = false;
+            lockedDuration = TimeSpan.Zero;
         }
 
         private void ApplyPlayer(string[] fields)
@@ -145,32 +136,38 @@ namespace BardSongTracker.Parse
                 return;
 
             playerId = fields[2];
-            playerName = fields[3];
+            var actor = GetOrAdd(playerId);
+            if (fields[3].Length > 0)
+                actor.Name = fields[3];
         }
 
         private void ApplyCombatant(string[] fields)
         {
-            if (fields.Length < 5 || playerId.Length == 0)
+            if (fields.Length < 5 || !IsPlayer(fields[2]))
                 return;
 
-            if (!string.Equals(fields[2], playerId, StringComparison.OrdinalIgnoreCase))
-                return;
+            var actor = GetOrAdd(fields[2]);
+            if (fields[3].Length > 0)
+                actor.Name = fields[3];
 
-            if (int.TryParse(fields[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var job))
-                jobId = job;
+            if (int.TryParse(fields[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var job) && job > 0)
+                actor.JobId = job;
         }
 
         private void ApplyAbility(string[] fields, DateTimeOffset clock)
         {
-            if (playerId.Length == 0 || fields.Length < 10)
+            if (fields.Length < 10)
                 return;
 
             var sourceId = fields[2];
             var targetId = fields[6];
             var ownerIndex = ActFields.AbilityIndex("ownerId");
             var ownerId = ownerIndex >= 0 && ownerIndex < fields.Length ? fields[ownerIndex] : "";
-            var mine = SameActor(sourceId, playerId) || (ownerId.Length > 0 && SameActor(ownerId, playerId));
-            if (!mine || IsPlayerOrEmpty(targetId) || IsLimitBreak(sourceId))
+            if (IsLimitBreak(sourceId) || IsPlayerOrEmpty(targetId))
+                return;
+
+            var creditId = IsPlayer(sourceId) ? sourceId : IsPlayer(ownerId) ? ownerId : "";
+            if (creditId.Length == 0)
                 return;
 
             var when = clock;
@@ -203,14 +200,47 @@ namespace BardSongTracker.Parse
 
             if (!inPull)
             {
+                ClearDamage();
                 inPull = true;
                 pullStart = when;
-                damage = 0;
                 lockedDuration = TimeSpan.Zero;
             }
 
-            damage += hit;
+            var credit = GetOrAdd(creditId);
+            if (credit.Name.Length == 0)
+                credit.Name = CreditName(fields, creditId, sourceId);
+
+            credit.Damage += hit;
             lastEvent = when;
+        }
+
+        private static string CreditName(string[] fields, string creditId, string sourceId)
+        {
+            if (SameActor(creditId, sourceId) && fields.Length > 3)
+                return fields[3];
+
+            var ownerNameIndex = ActFields.AbilityIndex("ownerName");
+            if (ownerNameIndex >= 0 && ownerNameIndex < fields.Length)
+                return fields[ownerNameIndex];
+
+            return "";
+        }
+
+        private Actor GetOrAdd(string id)
+        {
+            if (!actors.TryGetValue(id, out var actor))
+            {
+                actor = new Actor { Id = id };
+                actors[id] = actor;
+            }
+
+            return actor;
+        }
+
+        private void ClearDamage()
+        {
+            foreach (var actor in actors.Values)
+                actor.Damage = 0;
         }
 
         private static bool SameActor(string left, string right)
@@ -218,33 +248,47 @@ namespace BardSongTracker.Parse
             return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsPlayer(string id)
+        {
+            return id.Length >= 4 && id.StartsWith("10", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool IsPlayerOrEmpty(string id)
         {
             if (id.Length < 2)
                 return true;
 
-            return id.StartsWith("10", StringComparison.OrdinalIgnoreCase)
-                || id.StartsWith("E", StringComparison.OrdinalIgnoreCase);
+            return IsPlayer(id) || id.StartsWith("E", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsLimitBreak(string sourceId)
         {
             return sourceId.StartsWith("E", StringComparison.OrdinalIgnoreCase);
         }
+
+        private sealed class Actor
+        {
+            public string Id = "";
+            public string Name = "";
+            public int JobId;
+            public long Damage;
+        }
     }
+
+    public readonly record struct MeterRow(
+        string Name,
+        int JobId,
+        long Damage,
+        double Dps,
+        float Share,
+        bool You);
 
     public readonly record struct ParseSnapshot(
         bool Watching,
         string? LogFile,
-        string ZoneId,
         string ZoneName,
-        string PlayerName,
-        int JobId,
         bool InPull,
         TimeSpan Duration,
-        long Damage,
-        double Dps,
-        int? Percentile,
-        string Note,
-        PercentileScale.Point[] Ladder);
+        MeterRow[] Rows,
+        string Note);
 }

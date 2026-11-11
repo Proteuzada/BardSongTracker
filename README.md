@@ -2,12 +2,11 @@
 
 Dalamud plugin that tracks Bard songs and damage-over-time effects for tanks, healers, and DPS. The overlay shows the time remaining, and a sound plays when an effect reaches the alert threshold. In-game command: `/bst`.
 
-The menu has four tabs:
+The menu has three tabs:
 
-- **General** — overlay, volume, and sound test
+- **General** — overlay, damage meter, volume, and sound test
 - **Bard** — thresholds for Mage's Ballad, Army's Paeon, and The Wanderer's Minuet
 - **DoTs** — role and job filters, search, and a toggle for each skill
-- **Parse** — live percentile from the ACT network log
 
 In combat, only your current job is tracked. Enemy effects are read from your current target. Doton, Salted Earth, and Slipstream use the ground-effect timer on you.
 
@@ -19,13 +18,7 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 
 ## Live parse
 
-The Parse overlay tails the newest `Network_*.log` while Advanced Combat Tracker is open and logging. It does not read the DPS number printed in the ACT window. Damage amounts are decoded from the log, summed for your character and your pets, and divided by the length of the pull. The overlay is a small pair of numbers: damage per second and the percentile.
-
-FFLogs does not keep a rank for every score. It caches the DPS at fixed percentiles and places a new score by linear interpolation between the two nearest values. A score halfway between the 95% and 99% marks is a 97, and the shown percent is rounded down. The overlay does that interpolation against the JSON file set in the Parse tab.
-
-The DPS on screen is personal damage. It does not move buff damage between players the way rDPS does, so the table should be filled with pDPS marks from FFLogs. `rankings.example.json` shows the file shape only. The numbers in it are not a real ladder.
-
-A pull starts on your first damaging hit and locks after the configured silence, or when you change zone.
+The damage meter tails the newest `Network_*.log` in the usual Advanced Combat Tracker `FFXIVLogs` folder. Each row is a player: a bar, the damage, and that player's share of the pull. Pet damage is added to the owner. Drag any corner of the meter to resize it. The rows grow and shrink with the window. Show or hide it from the General tab.
 
 ## Install from Dalamud, without compiling
 
