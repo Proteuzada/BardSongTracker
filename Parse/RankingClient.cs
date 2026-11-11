@@ -192,29 +192,22 @@ namespace BardSongTracker.Parse
             if (zones.Count == 0)
                 await LoadZones(access);
 
-            ZoneInfo? bestZone = null;
-            var bestScore = 0;
-            var encounterId = 0;
+            var matched = new List<EncounterMatch.ZoneNames>();
             foreach (var zone in zones)
             {
-                var zoneScore = Score(zone.Name, zoneName);
-                if (zoneScore == 0)
+                if (EncounterMatch.Score(zone.Name, zoneName) == 0)
                     continue;
 
-                foreach (var encounter in zone.Encounters)
-                {
-                    var bossScore = Score(encounter.Name, bossName);
-                    var total = zoneScore + bossScore;
-                    if (bossScore == 0 || total <= bestScore)
-                        continue;
+                if (zone.Encounters.Count == 0 && zone.Id != 0)
+                    await LoadEncounters(access, zone);
 
-                    bestScore = total;
-                    bestZone = zone;
-                    encounterId = encounter.Id;
-                }
+                var names = new EncounterMatch.ZoneNames { Name = zone.Name };
+                foreach (var encounter in zone.Encounters)
+                    names.Encounters.Add(new EncounterMatch.EncounterName(encounter.Id, encounter.Name));
+                matched.Add(names);
             }
 
-            return bestZone == null ? 0 : encounterId;
+            return EncounterMatch.Pick(zoneName, bossName, matched);
         }
 
         private async Task LoadZones(string access)
@@ -244,7 +237,7 @@ namespace BardSongTracker.Parse
                     Id = zone.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
                     Name = zone.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                 };
-                if (zone.TryGetProperty("encounters", out var encounters))
+                if (zone.TryGetProperty("encounters", out var encounters) && encounters.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var encounter in encounters.EnumerateArray())
                     {
@@ -447,34 +440,41 @@ namespace BardSongTracker.Parse
             return json;
         }
 
-        private static int Score(string candidate, string wanted)
+        private async Task LoadEncounters(string access, ZoneInfo zone)
         {
-            if (string.Equals(candidate.Trim(), wanted.Trim(), StringComparison.OrdinalIgnoreCase))
-                return 4;
-
-            var left = Letters(candidate);
-            var right = Letters(wanted);
-            if (left.Length < 6 || right.Length < 6)
-                return 0;
-            if (left == right)
-                return 4;
-            if (left.Contains(right, StringComparison.Ordinal) || right.Contains(left, StringComparison.Ordinal))
-                return 2;
-
-            return 0;
-        }
-
-        private static string Letters(string text)
-        {
-            var buffer = new char[text.Length];
-            var count = 0;
-            foreach (var character in text)
+            var query = $$"""
+                query {
+                  worldData {
+                    zone(id: {{zone.Id}}) {
+                      encounters { id name }
+                    }
+                  }
+                }
+                """;
+            try
             {
-                if (char.IsLetterOrDigit(character))
-                    buffer[count++] = char.ToLowerInvariant(character);
-            }
+                using var json = await Graph(access, query);
+                if (!json.RootElement.TryGetProperty("data", out var data)
+                    || !data.TryGetProperty("worldData", out var world)
+                    || !world.TryGetProperty("zone", out var body)
+                    || body.ValueKind != JsonValueKind.Object
+                    || !body.TryGetProperty("encounters", out var encounters)
+                    || encounters.ValueKind != JsonValueKind.Array)
+                    return;
 
-            return new string(buffer, 0, count);
+                zone.Encounters.Clear();
+                foreach (var encounter in encounters.EnumerateArray())
+                {
+                    zone.Encounters.Add(new EncounterInfo
+                    {
+                        Id = encounter.TryGetProperty("id", out var encounterId) ? encounterId.GetInt32() : 0,
+                        Name = encounter.TryGetProperty("name", out var encounterName) ? encounterName.GetString() ?? "" : "",
+                    });
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }
 
         public static string SpecName(int jobId)
