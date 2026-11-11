@@ -765,7 +765,7 @@ namespace BardSongTracker.Parse
         }
     }
 
-    public readonly record struct MeterColumns(bool DamagePercent, bool Deaths, bool Encounter, bool HitDetails);
+    public readonly record struct MeterColumns(bool DamagePercent, bool Deaths, bool Encounter, bool HitDetails, bool Abbreviate);
 
     public readonly record struct MeterRow(
         string Name,

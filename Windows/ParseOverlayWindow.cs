@@ -98,7 +98,8 @@ namespace BardSongTracker.Windows
                 extra && configuration.ShowDamagePercent,
                 extra && configuration.ShowDeaths,
                 extra && configuration.ShowEncounterLine,
-                extra && configuration.ShowHitDetails);
+                extra && configuration.ShowHitDetails,
+                configuration.AbbreviateNumbers);
         }
     }
 }

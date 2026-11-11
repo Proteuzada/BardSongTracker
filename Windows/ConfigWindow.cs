@@ -584,6 +584,9 @@ namespace BardSongTracker.Windows
             PanelTitle("Rows");
             ImGui.TextWrapped("Leave the row as rDPS and parse, or turn on the extra columns.");
             ImGui.Spacing();
+            Checkbox("Abbreviate numbers (12k)", configuration.AbbreviateNumbers, value => configuration.AbbreviateNumbers = value);
+            ImGui.TextDisabled("Off shows the full number, such as 12580.");
+            ImGui.Spacing();
             Checkbox("Only rDPS and parse", configuration.MeterMinimal, value => configuration.MeterMinimal = value);
             ImGui.Spacing();
             ImGui.BeginDisabled(configuration.MeterMinimal);

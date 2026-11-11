@@ -26,6 +26,8 @@ namespace BardSongTracker.Windows
             var width = 220f * Math.Clamp(scale, 1f, 1.6f);
             if (columns.DamagePercent)
                 width += 36f * scale;
+            if (!columns.Abbreviate)
+                width += 36f * scale;
 
             return new Vector2(width, 12f + top + (14f * scale) + extra + (15f * scale * rows));
         }
@@ -58,7 +60,8 @@ namespace BardSongTracker.Windows
                     top = header;
                 }
 
-                var dpsCol = Math.Max(ImGui.CalcTextSize("rDPS").X, ImGui.CalcTextSize("999k").X);
+                var dpsSample = columns.Abbreviate ? "999k" : "999999";
+                var dpsCol = Math.Max(ImGui.CalcTextSize("rDPS").X, ImGui.CalcTextSize(dpsSample).X);
                 var parseCol = Math.Max(ImGui.CalcTextSize("Parse").X, ImGui.CalcTextSize("100").X);
                 var shareCol = columns.DamagePercent
                     ? Math.Max(ImGui.CalcTextSize("Dmg").X, ImGui.CalcTextSize("100%").X)
@@ -118,7 +121,7 @@ namespace BardSongTracker.Windows
                 if (shown == 0)
                     DrawNote(onlyYou ? "Waiting for your damage." : snap.Note, top + header + 2f, size.X);
                 else if (detail is { } chosen)
-                    DrawDetail(chosen, y, size.X, fontSize);
+                    DrawDetail(chosen, y, size.X, fontSize, columns.Abbreviate);
 
                 ForgetUnseen();
             }
@@ -209,7 +212,7 @@ namespace BardSongTracker.Windows
 
             var textY = min.Y + Math.Max(0f, (rowH - fontSize) * 0.5f);
             var nameY = min.Y + Math.Max(0f, (rowH - nameSize) * 0.5f);
-            var dpsText = Thousands(row.Dps);
+            var dpsText = FormatNumber(row.Dps, columns.Abbreviate);
             var dpsWidth = ImGui.CalcTextSize(dpsText).X;
             var dpsX = min.X + 8f + Math.Max(0f, dpsCol - dpsWidth);
             var icon = Math.Max(12f, rowH - 1f);
@@ -246,7 +249,7 @@ namespace BardSongTracker.Windows
             return ImGui.IsItemClicked(ImGuiMouseButton.Left);
         }
 
-        private static void DrawDetail(MeterRow row, float y, float width, float fontSize)
+        private static void DrawDetail(MeterRow row, float y, float width, float fontSize, bool abbreviate)
         {
             var font = ImGui.GetFont();
             var origin = ImGui.GetCursorScreenPos();
@@ -257,7 +260,7 @@ namespace BardSongTracker.Windows
             if (row.MaxHit > 0)
             {
                 var skill = string.IsNullOrWhiteSpace(row.MaxHitName) ? "Hit" : row.MaxHitName.Trim();
-                text += $"    {skill} {Thousands(row.MaxHit)}";
+                text += $"    {skill} {FormatNumber(row.MaxHit, abbreviate)}";
             }
 
             ImGui.GetWindowDrawList().AddText(font, fontSize, new Vector2(origin.X + 8f, origin.Y + y), muted, Fit(text, width - 16f, fontSize));
@@ -388,12 +391,13 @@ namespace BardSongTracker.Windows
             return string.Format(CultureInfo.InvariantCulture, "{0}:{1:00}", minutes, seconds);
         }
 
-        private static string Thousands(double value)
+        private static string FormatNumber(double value, bool abbreviate)
         {
-            if (value >= 1000d)
-                return Math.Round(value / 1000d, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture) + "k";
+            var rounded = Math.Round(value, MidpointRounding.AwayFromZero);
+            if (!abbreviate || rounded < 1000d)
+                return rounded.ToString("0", CultureInfo.InvariantCulture);
 
-            return Math.Round(value, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
+            return Math.Round(rounded / 1000d, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture) + "k";
         }
 
         private static string FirstName(string name)
