@@ -17,7 +17,7 @@ namespace BardSongTracker.Parse
     public sealed class RankingClient
     {
         private static readonly HttpClient Http = CreateHttp();
-        private static readonly int[] Marks = { 10, 25, 50, 75, 90, 95, 99, 100 };
+        private static readonly int[] Marks = { 10, 25, 50, 75, 90, 95, 97, 98, 99, 100 };
 
         private static HttpClient CreateHttp()
         {
@@ -197,7 +197,9 @@ namespace BardSongTracker.Parse
                 {
                 }
 
-                var encounter = knownId != 0 ? knownId : catalogId;
+                // A named phase, such as Kefka, has its own ladder. The whole-duty
+                // encounter is only the fallback when the catalog has no boss match.
+                var encounter = catalogId != 0 ? catalogId : knownId;
                 if (encounter == 0)
                 {
                     attemptKey = key;
@@ -206,7 +208,7 @@ namespace BardSongTracker.Parse
                     return;
                 }
 
-                var difficulty = knownId != 0 ? knownDifficulty : DifficultyFor(zone);
+                var difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
                 var loaded = 0;
                 foreach (var job in jobs)
                 {
@@ -222,10 +224,10 @@ namespace BardSongTracker.Parse
                         Store(zone, boss, job, partial);
                         SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                     });
-                    if ((points == null || points.Count == 0) && catalogId != 0 && catalogId != encounter)
+                    if ((points == null || points.Count == 0) && knownId != 0 && knownId != encounter)
                     {
-                        encounter = catalogId;
-                        difficulty = DifficultyFor(zone);
+                        encounter = knownId;
+                        difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
                         points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
                         {
                             Store(zone, boss, job, partial);
@@ -578,44 +580,142 @@ namespace BardSongTracker.Parse
         private async Task<List<PercentileScale.Point>?> Curve(string access, int encounterId, string spec, int partySize, int difficulty, Action<List<PercentileScale.Point>>? publish)
         {
             var first = await Page(access, encounterId, spec, partySize, 1, 0, difficulty);
-            if ((first.Rankings.Count == 0 || first.Count <= 0) && difficulty != 0)
+            if (first.Rankings.Count == 0 && difficulty != 0)
                 first = await Page(access, encounterId, spec, 0, 1, 0, 0);
-            if (first.Rankings.Count == 0 || first.Count <= 0)
+            if (first.Rankings.Count == 0)
                 first = await Page(access, encounterId, spec, 0, 1, -1, 0);
-            if (first.Rankings.Count == 0 || first.Count <= 0)
+            if (first.Rankings.Count == 0)
+                return null;
+
+            var population = await Population(access, encounterId, spec, first);
+            if (population < 1)
                 return null;
 
             var amounts = new Dictionary<int, double>();
             Remember(first, amounts);
-            var early = BuildPoints(amounts, first.Count);
-            if (early != null)
-                publish?.Invoke(early);
-
-            var pageSize = first.Rankings.Count;
-            if (first.HasMore && pageSize > 0)
+            var pageSize = Math.Max(1, first.Rankings.Count);
+            var pages = new List<int>();
+            foreach (var mark in Marks)
             {
-                var pages = new List<int>();
-                foreach (var mark in Marks)
-                {
-                    var rank = RankFor(mark, first.Count);
-                    var page = ((rank - 1) / pageSize) + 1;
-                    if (page > 1 && !pages.Contains(page))
-                        pages.Add(page);
-                }
+                var rank = PercentileScale.RankFor(mark, population);
+                var page = ((rank - 1) / pageSize) + 1;
+                if (page > 1 && !pages.Contains(page))
+                    pages.Add(page);
+            }
 
-                if (pages.Count > 0)
+            if (pages.Count > 0)
+            {
+                try
                 {
-                    try
-                    {
-                        await RememberPages(access, encounterId, spec, first.UsedSize, first.Partition, first.Difficulty, pages, amounts);
-                    }
-                    catch (Exception)
-                    {
-                    }
+                    await RememberPages(access, encounterId, spec, first.UsedSize, first.Partition, first.Difficulty, pages, amounts);
+                }
+                catch (Exception)
+                {
                 }
             }
 
-            return BuildPoints(amounts, first.Count) ?? early;
+            var points = BuildPoints(amounts, population);
+            if (points == null || !Spread(points))
+                return null;
+
+            publish?.Invoke(points);
+            return points;
+        }
+
+        private async Task<int> Population(string access, int encounterId, string spec, RankPage first)
+        {
+            if (first.Total > first.Rankings.Count)
+                return first.Total;
+            if (!first.HasMore)
+                return MaxRank(first);
+
+            var last = first;
+            var low = 1;
+            var guard = 0;
+            while (guard++ < 16)
+            {
+                var probe = await Probe(access, encounterId, spec, first, low * 2);
+                if (probe.Rankings.Count == 0)
+                    break;
+
+                last = probe;
+                low *= 2;
+                if (probe.Total > probe.Rankings.Count)
+                    return probe.Total;
+                if (!probe.HasMore)
+                    return MaxRank(probe);
+            }
+
+            var high = low * 2;
+            while (low + 1 < high && guard++ < 28)
+            {
+                var mid = (low + high) / 2;
+                var probe = await Probe(access, encounterId, spec, first, mid);
+                if (probe.Rankings.Count == 0)
+                {
+                    high = mid;
+                    continue;
+                }
+
+                last = probe;
+                low = mid;
+                if (probe.Total > probe.Rankings.Count)
+                    return probe.Total;
+                if (!probe.HasMore)
+                    return MaxRank(probe);
+            }
+
+            return MaxRank(last);
+        }
+
+        private async Task<RankPage> Probe(string access, int encounterId, string spec, RankPage first, int page)
+        {
+            try
+            {
+                return await Page(access, encounterId, spec, first.UsedSize, page, first.Partition, first.Difficulty);
+            }
+            catch (InvalidOperationException)
+            {
+                return new RankPage();
+            }
+        }
+
+        private static int MaxRank(RankPage page)
+        {
+            var max = 0;
+            foreach (var row in page.Rankings)
+            {
+                if (row.Rank > max)
+                    max = row.Rank;
+            }
+
+            if (max > 0)
+                return max;
+
+            return Math.Max(0, (page.Page - 1) * page.Rankings.Count) + page.Rankings.Count;
+        }
+
+        private static bool Spread(List<PercentileScale.Point> points)
+        {
+            var lowest = 100;
+            var lowDps = 0d;
+            var highDps = 0d;
+            foreach (var point in points)
+            {
+                if (point.Percentile <= 0 || point.Dps <= 0)
+                    continue;
+
+                if (point.Percentile < lowest)
+                {
+                    lowest = point.Percentile;
+                    lowDps = point.Dps;
+                }
+
+                if (point.Dps > highDps)
+                    highDps = point.Dps;
+            }
+
+            return lowest <= 25 && highDps > lowDps * 1.02;
         }
 
         private static List<PercentileScale.Point>? BuildPoints(Dictionary<int, double> amounts, int count)
@@ -623,7 +723,7 @@ namespace BardSongTracker.Parse
             var points = new List<PercentileScale.Point> { new(0, 0) };
             foreach (var mark in Marks)
             {
-                var rank = RankFor(mark, count);
+                var rank = PercentileScale.RankFor(mark, count);
                 if (!amounts.TryGetValue(rank, out var dps) || dps <= 0)
                     continue;
 
@@ -641,6 +741,7 @@ namespace BardSongTracker.Parse
                 ZoneName = zone.Trim(),
                 Boss = boss.Trim(),
                 JobId = job,
+                CurveVersion = RankingTable.CurveVersion,
                 FetchedAt = DateTimeOffset.UtcNow,
                 Points = points,
             });
@@ -707,22 +808,6 @@ namespace BardSongTracker.Parse
             }
         }
 
-        private static int RankFor(int percentile, int count)
-        {
-            if (count < 1)
-                return 1;
-            if (percentile >= 100)
-                return 1;
-
-            var rank = (int)Math.Round((100 - percentile) / 100d * count);
-            if (rank < 1)
-                rank = 1;
-            if (rank > count)
-                rank = count;
-
-            return rank;
-        }
-
         private async Task<RankPage> Page(string access, int encounterId, string spec, int partySize, int page, int partition, int difficulty)
         {
             var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
@@ -779,13 +864,13 @@ namespace BardSongTracker.Parse
             if (rankings.ValueKind != JsonValueKind.Object)
                 return;
 
-            if (rankings.TryGetProperty("count", out var count))
-            {
-                if (count.TryGetInt32(out var total))
-                    page.Count = total;
-                else if (count.TryGetDouble(out var totalDouble) && totalDouble > 0)
-                    page.Count = (int)totalDouble;
-            }
+            var stated = ReadJsonInt(rankings, "count");
+            var total = ReadJsonInt(rankings, "total");
+            if (total <= 0)
+                total = ReadJsonInt(rankings, "totalRankings");
+            if (total <= stated)
+                total = stated;
+            page.Count = stated;
             if (rankings.TryGetProperty("hasMorePages", out var more))
                 page.HasMore = more.ValueKind == JsonValueKind.True;
             if (rankings.TryGetProperty("page", out var pageNumber) && pageNumber.TryGetInt32(out var parsedPage) && parsedPage > 0)
@@ -813,10 +898,24 @@ namespace BardSongTracker.Parse
                 page.Rankings.Add(new RankRow { Rank = rank, Amount = amount });
             }
 
-            if (page.Count <= 0)
-                page.Count = page.Rankings.Count;
-            if (page.Count > page.Rankings.Count)
-                page.HasMore = true;
+            // count is the page length when it is no larger than the rows returned.
+            // The population is larger whenever another page exists.
+            if (total > page.Rankings.Count)
+                page.Total = total;
+            else if (!page.HasMore && page.Rankings.Count > 0)
+                page.Total = MaxRank(page);
+        }
+
+        private static int ReadJsonInt(JsonElement element, string name)
+        {
+            if (!element.TryGetProperty(name, out var value))
+                return 0;
+            if (value.TryGetInt32(out var parsed))
+                return parsed;
+            if (value.TryGetDouble(out var number) && number > 0)
+                return (int)number;
+
+            return 0;
         }
 
         private static double ReadDouble(JsonElement element)
@@ -949,6 +1048,7 @@ namespace BardSongTracker.Parse
         {
             public int Page = 1;
             public int Count;
+            public int Total;
             public int UsedSize;
             public int Partition;
             public int Difficulty;

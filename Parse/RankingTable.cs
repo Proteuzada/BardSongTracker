@@ -8,6 +8,8 @@ namespace BardSongTracker.Parse
 {
     public sealed class RankingTable
     {
+        public const int CurveVersion = 2;
+
         private readonly List<Entry> entries = new();
 
         public string? Error { get; private set; }
@@ -40,7 +42,12 @@ namespace BardSongTracker.Parse
                 }
 
                 foreach (var encounter in file.Encounters)
+                {
+                    if (encounter.CurveVersion < CurveVersion)
+                        continue;
+
                     table.entries.Add(Entry.From(encounter));
+                }
             }
             catch (Exception ex)
             {
@@ -72,6 +79,7 @@ namespace BardSongTracker.Parse
                         ZoneName = entry.ZoneName,
                         Boss = entry.Boss,
                         JobId = entry.JobId,
+                        CurveVersion = CurveVersion,
                         FetchedAt = entry.FetchedAt,
                         Percentiles = points,
                     });
@@ -138,6 +146,8 @@ namespace BardSongTracker.Parse
             {
                 foreach (var candidate in entries)
                 {
+                    if (candidate.CurveVersion < CurveVersion)
+                        continue;
                     if (jobId <= 0 || candidate.JobId != jobId)
                         continue;
                     if (candidate.Points.Count == 0)
@@ -161,6 +171,8 @@ namespace BardSongTracker.Parse
             {
                 foreach (var candidate in entries)
                 {
+                    if (candidate.CurveVersion < CurveVersion)
+                        continue;
                     if (candidate.JobId != 0 && candidate.JobId != jobId)
                         continue;
                     if (candidate.Points.Count == 0)
@@ -252,6 +264,7 @@ namespace BardSongTracker.Parse
             public string ZoneName { get; init; } = "";
             public string Boss { get; init; } = "";
             public int JobId { get; init; }
+            public int CurveVersion { get; init; }
             public DateTimeOffset FetchedAt { get; init; }
             public List<PercentileScale.Point> Points { get; init; } = new();
 
@@ -271,6 +284,7 @@ namespace BardSongTracker.Parse
                     ZoneName = model.ZoneName?.Trim() ?? "",
                     Boss = model.Boss?.Trim() ?? model.Encounter?.Trim() ?? "",
                     JobId = model.JobId != 0 ? model.JobId : JobIdFromName(model.Job),
+                    CurveVersion = model.CurveVersion,
                     FetchedAt = model.FetchedAt,
                     Points = points,
                 };
@@ -310,6 +324,7 @@ namespace BardSongTracker.Parse
             public string? Encounter { get; set; }
             public string? Job { get; set; }
             public int JobId { get; set; }
+            public int CurveVersion { get; set; }
             public DateTimeOffset FetchedAt { get; set; }
             public List<PointModel>? Percentiles { get; set; }
         }

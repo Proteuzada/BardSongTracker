@@ -14,6 +14,70 @@ namespace BardSongTracker.Parse
     {
         public readonly record struct Point(int Percentile, double Dps);
 
+        /// <summary>
+        /// Rank 1 is the best log. A rank's parse is the site's
+        /// floor(100 * (1 - (rank - 1) / count)).
+        /// </summary>
+        public static int RankFor(int percentile, int count)
+        {
+            if (count < 1 || percentile >= 100)
+                return 1;
+
+            var rank = 1 + ((100 - percentile) * (long)count) / 100;
+            if (rank < 1)
+                rank = 1;
+            if (rank > count)
+                rank = count;
+
+            return (int)rank;
+        }
+
+        public static int PercentOf(int rank, int count)
+        {
+            if (count < 1 || rank <= 1)
+                return 100;
+
+            var value = (100L * (count - rank + 1)) / count;
+            if (value > 100)
+                value = 100;
+            if (value < 0)
+                value = 0;
+            return (int)value;
+        }
+
+        public static string? SelfCheck()
+        {
+            if (RankFor(100, 10000) != 1)
+                return "best rank";
+            if (RankFor(95, 1000) != 51 || PercentOf(51, 1000) != 95)
+                return "p95";
+            if (RankFor(10, 1000) != 901 || PercentOf(901, 1000) != 10)
+                return "p10";
+
+            // The first page of rankings is the top logs. Treating that page as the
+            // whole ladder labels one of those top logs as the 10% mark, so a 95
+            // and a 35 both draw between 0 and 10.
+            var collapsed = new List<Point> { new(0, 0), new(10, 45000), new(100, 48000) };
+            if (Interpolate(38000, collapsed) != 8)
+                return "collapsed " + Interpolate(38000, collapsed);
+
+            var ladder = new List<Point>
+            {
+                new(0, 0),
+                new(10, 18000),
+                new(50, 28000),
+                new(90, 35000),
+                new(95, 37000),
+                new(99, 42000),
+                new(100, 45000),
+            };
+            var parse = Interpolate(38000, ladder);
+            if (parse < 95 || parse > 97)
+                return "ladder " + parse;
+
+            return null;
+        }
+
         public static int Interpolate(double dps, IReadOnlyList<Point> points)
         {
             if (points == null || points.Count == 0 || dps <= 0)
