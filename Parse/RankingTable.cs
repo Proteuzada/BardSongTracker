@@ -8,7 +8,7 @@ namespace BardSongTracker.Parse
 {
     public sealed class RankingTable
     {
-        public const int CurveVersion = 4;
+        public const int CurveVersion = 5;
 
         private readonly List<Entry> entries = new();
 

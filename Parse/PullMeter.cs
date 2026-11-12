@@ -915,9 +915,10 @@ namespace BardSongTracker.Parse
 
         private int ParseFor(Actor actor, double wholeDps, string boss, bool refresh)
         {
-            if (PhasePlan.Ladder(zoneName, 0).Length == 0)
+            if (PhasePlan.SingleLadder(zoneName) || PhasePlan.Ladder(zoneName, 0).Length == 0)
             {
-                if (rankings != null && rankings.TryDisplay(zoneId, zoneName, boss, actor.JobId, out var scale))
+                var ladder = PhasePlan.SingleLadder(zoneName) ? zoneName : boss;
+                if (rankings != null && rankings.TryDisplay(zoneId, zoneName, ladder, actor.JobId, out var scale))
                     return PercentileScale.Interpolate(wholeDps, scale.Points);
                 return -1;
             }

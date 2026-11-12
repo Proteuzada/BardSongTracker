@@ -4,9 +4,8 @@ using System.Collections.Generic;
 namespace BardSongTracker.Parse
 {
     /// <summary>
-    /// FF Logs ranks each part of an ultimate on its own. The log keeps one pull
-    /// running, so the meter cuts when that part's boss is down or the next part
-    /// shows itself.
+    /// The log keeps one pull running. FF Logs ranks some ultimates as one
+    /// encounter and others as a ladder per part. The meter follows that split.
     /// </summary>
     internal static class PhasePlan
     {
@@ -180,6 +179,23 @@ namespace BardSongTracker.Parse
                 return "";
 
             return steps[phase].Ladder;
+        }
+
+        /// <summary>
+        /// The current FF Logs boss menu lists these three with no phase submenu:
+        /// The Unending Coil of Bahamut (1073), The Weapon's Refrain (1074),
+        /// and The Epic of Alexander (1075). Dancing Mad, Futures Rewritten,
+        /// Dragonsong's Reprise, and The Omega Protocol list each part.
+        /// </summary>
+        public static bool SingleLadder(string zone)
+        {
+            if (string.IsNullOrWhiteSpace(zone))
+                return false;
+
+            return zone.Contains("Unending Coil", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Weapon's Refrain", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Weapons Refrain", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Epic of Alexander", StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsSplit(string zone, string boss)
@@ -371,6 +387,20 @@ namespace BardSongTracker.Parse
                 return "split name";
             if (IsSplit("Futures Rewritten (Ultimate)", "Futures Rewritten"))
                 return "whole name";
+            if (!SingleLadder("the Unending Coil of Bahamut (Ultimate)"))
+                return "ucob ladder";
+            if (!SingleLadder("The Weapon's Refrain (Ultimate)"))
+                return "uwu ladder";
+            if (!SingleLadder("The Epic of Alexander (Ultimate)"))
+                return "tea ladder";
+            if (SingleLadder("Dancing Mad (Ultimate)"))
+                return "dmu ladder";
+            if (SingleLadder("Futures Rewritten (Ultimate)"))
+                return "fru ladder";
+            if (SingleLadder("The Omega Protocol (Ultimate)"))
+                return "top ladder";
+            if (SingleLadder("Dragonsong's Reprise (Ultimate)"))
+                return "dsr ladder";
 
             return null;
         }

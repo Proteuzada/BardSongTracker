@@ -131,6 +131,8 @@ namespace BardSongTracker.Parse
             var ladders = PhasePlan.Names(snap.ZoneName);
             if (ladders.Length == 0)
                 ladders = new[] { bossName };
+            else if (PhasePlan.SingleLadder(snap.ZoneName))
+                ladders = new[] { snap.ZoneName.Trim() };
 
             var jobs = new List<int>();
             foreach (var row in snap.Rows)
@@ -171,19 +173,6 @@ namespace BardSongTracker.Parse
                 }
             }
 
-            if (missing && ladders.Length > 1)
-            {
-                var dutyReady = true;
-                foreach (var job in jobs)
-                {
-                    if (!table.TryFresh(snap.ZoneName, snap.ZoneName, job, TimeSpan.FromHours(12), out _))
-                        dutyReady = false;
-                }
-
-                if (dutyReady)
-                    missing = false;
-            }
-
             if (!missing)
             {
                 attemptKey = key;
@@ -214,35 +203,46 @@ namespace BardSongTracker.Parse
                 var wanted = 0;
                 string? missed = null;
                 var targets = new List<(string Boss, int Encounter, bool Split)>();
-                foreach (var boss in bosses)
+                if (PhasePlan.SingleLadder(zone))
                 {
-                    var catalogId = 0;
-                    try
-                    {
-                        catalogId = await FindEncounter(access, zone, boss);
-                    }
-                    catch (Exception) when (knownId != 0)
-                    {
-                    }
-
-                    // A named part keeps its own ladder. The whole-duty id is only
-                    // used when the site has no separate encounter for that part.
-                    var split = PhasePlan.IsSplit(zone, boss);
-                    if (split && knownId != 0 && (catalogId == 0 || catalogId == knownId))
-                        continue;
-
-                    var encounter = catalogId != 0 ? catalogId : knownId;
-                    if (encounter == 0)
-                    {
-                        missed = boss;
-                        continue;
-                    }
-
-                    targets.Add((boss, encounter, split));
+                    if (knownId == 0)
+                        missed = zone;
+                    else
+                        targets.Add((zone, knownId, false));
                 }
+                else
+                {
+                    var parentOnly = bosses.Count > 0;
+                    foreach (var boss in bosses)
+                    {
+                        var catalogId = 0;
+                        try
+                        {
+                            catalogId = await FindEncounter(access, zone, boss);
+                        }
+                        catch (Exception) when (knownId != 0)
+                        {
+                        }
 
-                if (targets.Count == 0 && knownId != 0)
-                    targets.Add((zone, knownId, false));
+                        // A part is its own ladder only when the catalog has an
+                        // encounter that is not the whole fight. A failed lookup
+                        // is not that answer.
+                        if (catalogId != 0 && catalogId != knownId)
+                        {
+                            targets.Add((boss, catalogId, true));
+                            parentOnly = false;
+                            continue;
+                        }
+
+                        if (catalogId == 0 || catalogId != knownId)
+                            parentOnly = false;
+                    }
+
+                    if (targets.Count == 0 && parentOnly && knownId != 0)
+                        targets.Add((zone, knownId, false));
+                    else if (targets.Count == 0 && bosses.Count > 0)
+                        missed = bosses[0];
+                }
 
                 foreach (var target in targets)
                 {
