@@ -197,9 +197,12 @@ namespace BardSongTracker.Parse
                 {
                 }
 
-                // A named phase, such as Kefka, has its own ladder. The whole-duty
-                // encounter is only the fallback when the catalog has no boss match.
-                var encounter = catalogId != 0 ? catalogId : knownId;
+                // Each part of a split duty has its own ladder. The whole-duty id
+                // is a different fight, so it is not a stand-in for one part.
+                var split = PhasePlan.IsSplit(zone, boss);
+                if (split && knownId != 0 && catalogId == knownId)
+                    catalogId = 0;
+                var encounter = catalogId != 0 ? catalogId : (split ? 0 : knownId);
                 if (encounter == 0)
                 {
                     attemptKey = key;
@@ -224,7 +227,7 @@ namespace BardSongTracker.Parse
                         Store(zone, boss, job, partial);
                         SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                     });
-                    if ((points == null || points.Count == 0) && knownId != 0 && knownId != encounter)
+                    if (!split && (points == null || points.Count == 0) && knownId != 0 && knownId != encounter)
                     {
                         encounter = knownId;
                         difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);

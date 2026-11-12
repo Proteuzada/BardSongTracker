@@ -22,6 +22,8 @@ namespace BardSongTracker.Parse
         private bool combatIdle;
         private readonly Dictionary<string, long> damageToEnemy = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> enemyNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> phaseDown = new(StringComparer.OrdinalIgnoreCase);
+        private int phaseIndex;
         private readonly List<BuffWindow> buffs = new();
         private readonly List<RdpsMath.External> externalScratch = new();
         private RankingTable? rankings;
@@ -57,7 +59,7 @@ namespace BardSongTracker.Parse
                     ApplyCombatant(fields);
                     break;
                 case "04":
-                    ApplyRemove(fields);
+                    ApplyRemove(fields, clock);
                     break;
                 case "12":
                     ApplyLocalJob(fields);
@@ -264,10 +266,23 @@ namespace BardSongTracker.Parse
             actor.HasStats = actor.CritStat > 0 || actor.DirectStat > 0;
         }
 
-        private void ApplyRemove(string[] fields)
+        private void ApplyRemove(string[] fields, DateTimeOffset clock)
         {
             if (fields.Length < 3 || !IsEnemy(fields[2]))
                 return;
+
+            var name = fields.Length > 3 ? fields[3] : "";
+            if (name.Length == 0 && enemyNames.TryGetValue(fields[2], out var known))
+                name = known;
+            if (name.Length > 0)
+                enemyNames[fields[2]] = name;
+
+            var next = PhasePlan.Down(zoneName, phaseIndex, name, phaseDown);
+            if (next > phaseIndex)
+            {
+                CutTo(next, Stamp(fields, clock));
+                return;
+            }
 
             MarkVanished(fields[2]);
         }
@@ -295,6 +310,7 @@ namespace BardSongTracker.Parse
             var when = Stamp(fields, clock);
             if (IsPlayer(sourceId) && AnimationLock(fields) > 0.05)
                 Revive(sourceId, when);
+            NoticePhase(sourceId, fields.Length > 3 ? fields[3] : "", targetId, fields.Length > 7 ? fields[7] : "", when);
             if (IsLimitBreak(sourceId) || IsPlayerOrEmpty(targetId))
                 return;
 
@@ -412,9 +428,23 @@ namespace BardSongTracker.Parse
             if (!IsEnemy(fields[2]))
                 return;
 
+            var name = fields.Length > 3 ? fields[3] : "";
+            if (name.Length == 0 && enemyNames.TryGetValue(fields[2], out var known))
+                name = known;
+            if (name.Length > 0)
+                enemyNames[fields[2]] = name;
+
+            var when = Stamp(fields, clock);
+            var next = PhasePlan.Down(zoneName, phaseIndex, name, phaseDown);
+            if (next > phaseIndex)
+            {
+                CutTo(next, when);
+                return;
+            }
+
             killedEnemies.Add(fields[2]);
             if (!pullSealed && HasDamage() && AllDamagedDead())
-                Seal(Stamp(fields, clock));
+                Seal(when);
         }
 
         private void ApplyDirector(string[] fields)
@@ -702,6 +732,10 @@ namespace BardSongTracker.Parse
 
         private string BossName()
         {
+            var ladder = PhasePlan.Ladder(zoneName, phaseIndex);
+            if (ladder.Length > 0)
+                return ladder;
+
             var bestId = "";
             long best = 0;
             foreach (var pair in damageToEnemy)
@@ -742,10 +776,59 @@ namespace BardSongTracker.Parse
 
         private void NoteCast(string[] fields, DateTimeOffset clock)
         {
-            if (fields.Length < 3 || !IsPlayer(fields[2]))
+            if (fields.Length < 3)
                 return;
 
-            Revive(fields[2], Stamp(fields, clock));
+            var when = Stamp(fields, clock);
+            if (fields.Length > 5)
+            {
+                var next = PhasePlan.Signal(phaseIndex, fields.Length > 3 ? fields[3] : "", fields[5]);
+                if (next > phaseIndex && PhasePlan.Ladder(zoneName, 0).Length > 0)
+                    CutTo(next, when);
+            }
+
+            if (!IsPlayer(fields[2]))
+                return;
+
+            Revive(fields[2], when);
+        }
+
+        private void NoticePhase(string sourceId, string sourceName, string targetId, string targetName, DateTimeOffset when)
+        {
+            if (PhasePlan.Ladder(zoneName, 0).Length == 0)
+                return;
+
+            if (IsEnemy(sourceId) && sourceName.Length > 0)
+                enemyNames[sourceId] = sourceName;
+            if (IsEnemy(targetId) && targetName.Length > 0)
+                enemyNames[targetId] = targetName;
+
+            var next = PhasePlan.Signal(phaseIndex, sourceName, "");
+            if (next < 0)
+                next = PhasePlan.Signal(phaseIndex, targetName, "");
+            if (next > phaseIndex)
+                CutTo(next, when);
+        }
+
+        private void CutTo(int next, DateTimeOffset when)
+        {
+            if (next <= phaseIndex)
+                return;
+
+            if (HasDamage())
+            {
+                if (!pullSealed)
+                    Seal(when);
+                Archive();
+            }
+
+            ClearDamage();
+            ClearEncounter();
+            phaseDown.Clear();
+            phaseIndex = next;
+            inPull = false;
+            pullSealed = true;
+            lockedDuration = TimeSpan.Zero;
         }
 
         private void NoteHealth(string[] fields, DateTimeOffset clock)
@@ -809,6 +892,8 @@ namespace BardSongTracker.Parse
 
             ClearDamage();
             ClearEncounter();
+            phaseDown.Clear();
+            phaseIndex = 0;
             inPull = false;
             pullSealed = false;
             combatIdle = false;
