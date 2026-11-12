@@ -21,7 +21,7 @@ namespace BardSongTracker.Parse
 
         private static HttpClient CreateHttp()
         {
-            var http = new HttpClient { Timeout = TimeSpan.FromSeconds(40) };
+            var http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("BardSongTracker");
             return http;
         }
@@ -90,6 +90,8 @@ namespace BardSongTracker.Parse
                         return "Checking FF Logs…";
                     if (clientState == 3)
                         return "FF Logs client rejected";
+                    if (clientState == 4)
+                        return "FF Logs did not answer";
                     if (status.StartsWith("Parse curve loaded", StringComparison.Ordinal))
                         return "FF Logs connected";
                     if (status.StartsWith("Loading", StringComparison.Ordinal))
@@ -112,6 +114,9 @@ namespace BardSongTracker.Parse
             var id = clientId?.Trim() ?? "";
             var secret = clientSecret?.Trim() ?? "";
             EnsureClient(id, secret);
+            var gateState = ClientState;
+            if (gateState == 3 || gateState == 4)
+                return;
             if (id.Length == 0 || secret.Length == 0)
             {
                 SetStatus("Add an FF Logs API client on the Logs tab. The parse stays blank until the curve for this boss is loaded.");
@@ -303,15 +308,22 @@ namespace BardSongTracker.Parse
                 else
                     SetStatus("FF Logs returned no ranking curve for " + label + ".");
             }
+            catch (LogsFailure ex)
+            {
+                if (ex.Kind == LogsFailure.Reason.Rejected)
+                    SetClient(3, ex.Message);
+                else
+                    NoteTemporary(ex.Message);
+
+                attemptKey = key;
+                retryAfter = DateTimeOffset.UtcNow.AddSeconds(ex.Kind == LogsFailure.Reason.Rejected ? 120 : 20);
+            }
             catch (Exception ex)
             {
-                if (IsClientRejection(ex.Message))
-                    SetClient(3, ex.Message);
-
-                var timedOut = ex is TaskCanceledException || ex.Message.Contains("HttpClient.Timeout", StringComparison.OrdinalIgnoreCase);
+                var line = TimedOut(ex) ? "FF Logs did not answer in time. Trying again." : ex.Message;
+                NoteTemporary(line);
                 attemptKey = key;
-                retryAfter = DateTimeOffset.UtcNow.AddSeconds(timedOut ? 20 : 120);
-                SetStatus(timedOut ? "FF Logs did not answer in time. Trying again." : ex.Message);
+                retryAfter = DateTimeOffset.UtcNow.AddSeconds(20);
             }
             finally
             {
@@ -338,6 +350,8 @@ namespace BardSongTracker.Parse
                 if (id == checkedId && secret == checkedSecret && clientState == 1)
                     return;
                 if (id == checkedId && secret == checkedSecret && clientState == 3 && DateTimeOffset.UtcNow < clientRetry)
+                    return;
+                if (id == checkedId && secret == checkedSecret && clientState == 4 && DateTimeOffset.UtcNow < clientRetry)
                     return;
                 if (id == checkedId && secret == checkedSecret && clientState == 2 && DateTimeOffset.UtcNow < tokenUntil)
                     return;
@@ -384,16 +398,16 @@ namespace BardSongTracker.Parse
                         status = "API client connected. The parse fills in during a ranked fight.";
                 }
             }
+            catch (LogsFailure ex)
+            {
+                if (ex.Kind == LogsFailure.Reason.Rejected)
+                    SetClient(3, ex.Message);
+                else
+                    NoteTemporary(ex.Message);
+            }
             catch (Exception ex)
             {
-                lock (gate)
-                {
-                    var timedOut = ex is TaskCanceledException || ex.Message.Contains("HttpClient.Timeout", StringComparison.OrdinalIgnoreCase);
-                    clientState = 3;
-                    clientLine = timedOut ? "FF Logs did not answer in time. Trying again." : ex.Message;
-                    clientRetry = DateTimeOffset.UtcNow.AddSeconds(timedOut ? 20 : 120);
-                    status = clientLine;
-                }
+                NoteTemporary(TimedOut(ex) ? "FF Logs did not answer in time. Trying again." : ex.Message);
             }
             finally
             {
@@ -425,10 +439,19 @@ namespace BardSongTracker.Parse
             }
         }
 
-        private static bool IsClientRejection(string message)
+        private void NoteTemporary(string line)
         {
-            return message.Contains("API client", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("access token", StringComparison.OrdinalIgnoreCase);
+            lock (gate)
+            {
+                if (clientState != 2)
+                {
+                    clientState = 4;
+                    clientLine = line;
+                    clientRetry = DateTimeOffset.UtcNow.AddSeconds(20);
+                }
+
+                status = line;
+            }
         }
 
         private void SetClient(int state, string line)
@@ -437,6 +460,7 @@ namespace BardSongTracker.Parse
             {
                 clientState = state;
                 clientLine = line;
+                status = line;
                 if (state == 3)
                     clientRetry = DateTimeOffset.UtcNow.AddMinutes(2);
             }
@@ -447,18 +471,43 @@ namespace BardSongTracker.Parse
             if (token.Length > 0 && DateTimeOffset.UtcNow < tokenUntil)
                 return token;
 
+            LogsFailure? last = null;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    return await RequestToken(clientId, clientSecret);
+                }
+                catch (LogsFailure ex) when (ex.Kind != LogsFailure.Reason.Rejected && attempt == 0)
+                {
+                    last = ex;
+                    await Task.Delay(1500);
+                }
+                catch (Exception ex) when (attempt == 0 && ex is not LogsFailure && (TimedOut(ex) || ex is HttpRequestException))
+                {
+                    last = new LogsFailure(LogsFailure.Reason.Temporary, "FF Logs did not answer in time. Trying again.");
+                    await Task.Delay(1500);
+                }
+            }
+
+            throw last ?? new LogsFailure(LogsFailure.Reason.Temporary, "FF Logs did not answer in time. Trying again.");
+        }
+
+        private async Task<string> RequestToken(string clientId, string clientSecret)
+        {
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://www.fflogs.com/oauth/token");
             var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes(clientId + ":" + clientSecret));
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
-            request.Content = new StringContent("grant_type=client_credentials", Encoding.UTF8, "application/x-www-form-urlencoded");
+            request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes("grant_type=client_credentials"));
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
             using var response = await Http.SendAsync(request);
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException("FF Logs rejected the API client. Check the id and secret on the Logs tab.");
+                throw FailureFor(response.StatusCode, body, true);
 
             using var json = JsonDocument.Parse(body);
             if (!json.RootElement.TryGetProperty("access_token", out var access))
-                throw new InvalidOperationException("FF Logs did not return an access token.");
+                throw new LogsFailure(LogsFailure.Reason.Temporary, "FF Logs did not return an access token. Trying again.");
 
             token = access.GetString() ?? "";
             var seconds = 3600;
@@ -467,6 +516,36 @@ namespace BardSongTracker.Parse
 
             tokenUntil = DateTimeOffset.UtcNow.AddSeconds(seconds - 60);
             return token;
+        }
+
+        private static LogsFailure FailureFor(System.Net.HttpStatusCode status, string body, bool tokenCall)
+        {
+            if ((int)status == 429 || body.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                return new LogsFailure(LogsFailure.Reason.RateLimit, "FF Logs is busy. Trying again.");
+
+            var invalid = body.Contains("invalid_client", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("Client authentication failed", StringComparison.OrdinalIgnoreCase);
+            if (tokenCall && (status == System.Net.HttpStatusCode.Unauthorized || invalid))
+                return new LogsFailure(LogsFailure.Reason.Rejected, "FF Logs rejected this client. Check the id and secret on the Logs tab.");
+
+            if (status == System.Net.HttpStatusCode.Unauthorized)
+                return new LogsFailure(LogsFailure.Reason.Temporary, "FF Logs session expired. Trying again.");
+
+            return new LogsFailure(LogsFailure.Reason.Temporary, "FF Logs did not answer (" + (int)status + "). Trying again.");
+        }
+
+        private static bool TimedOut(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current is TaskCanceledException || current is TimeoutException)
+                    return true;
+                if (current.Message.Contains("HttpClient.Timeout", StringComparison.OrdinalIgnoreCase)
+                    || current.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         private async Task<int> FindEncounter(string access, string zoneName, string bossName)
@@ -982,7 +1061,7 @@ namespace BardSongTracker.Parse
                 : 0;
         }
 
-        private static async Task<JsonDocument> Graph(string access, string query)
+        private async Task<JsonDocument> Graph(string access, string query)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://www.fflogs.com/api/v2/client");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
@@ -992,8 +1071,16 @@ namespace BardSongTracker.Parse
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                var detail = body.Length > 80 ? body[..80] : body;
-                throw new InvalidOperationException("FF Logs rankings could not be loaded (" + (int)response.StatusCode + "). " + detail);
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    lock (gate)
+                    {
+                        token = "";
+                        tokenUntil = default;
+                    }
+                }
+
+                throw FailureFor(response.StatusCode, body, false);
             }
 
             var json = JsonDocument.Parse(body);
@@ -1005,7 +1092,13 @@ namespace BardSongTracker.Parse
                     message = text.GetString() ?? message;
 
                 json.Dispose();
-                throw new InvalidOperationException(message);
+                if (message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                    throw new LogsFailure(LogsFailure.Reason.RateLimit, "FF Logs is busy. Trying again.");
+                if (message.Contains("invalid_client", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("Client authentication failed", StringComparison.OrdinalIgnoreCase))
+                    throw new LogsFailure(LogsFailure.Reason.Rejected, "FF Logs rejected this client. Check the id and secret on the Logs tab.");
+
+                throw new LogsFailure(LogsFailure.Reason.Temporary, "FF Logs rankings could not be loaded. Trying again.");
             }
 
             return json;
@@ -1082,6 +1175,23 @@ namespace BardSongTracker.Parse
         {
             lock (gate)
                 status = message;
+        }
+
+        private sealed class LogsFailure : Exception
+        {
+            public enum Reason
+            {
+                Rejected,
+                RateLimit,
+                Temporary,
+            }
+
+            public LogsFailure(Reason kind, string message) : base(message)
+            {
+                Kind = kind;
+            }
+
+            public Reason Kind { get; }
         }
 
         private sealed class ZoneInfo

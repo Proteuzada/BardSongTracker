@@ -699,7 +699,7 @@ namespace BardSongTracker.Windows
             var color = state switch
             {
                 2 => new Vector4(0.45f, 0.86f, 0.55f, 1f),
-                1 => new Vector4(1f, 0.78f, 0.45f, 1f),
+                1 or 4 => new Vector4(1f, 0.78f, 0.45f, 1f),
                 3 => new Vector4(1f, 0.55f, 0.45f, 1f),
                 _ => new Vector4(0.68f, 0.72f, 0.78f, 1f),
             };
