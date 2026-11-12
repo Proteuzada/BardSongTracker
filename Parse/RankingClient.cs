@@ -179,6 +179,11 @@ namespace BardSongTracker.Parse
                 var access = await Token(clientId, clientSecret);
                 MarkConnected();
                 var encounter = await FindEncounter(access, zone, boss);
+                var dutyEncounter = string.Equals(boss.Trim(), zone.Trim(), StringComparison.OrdinalIgnoreCase)
+                    ? encounter
+                    : await FindEncounter(access, zone, zone);
+                if (encounter == 0)
+                    encounter = dutyEncounter;
                 if (encounter == 0)
                 {
                     attemptKey = key;
@@ -187,6 +192,7 @@ namespace BardSongTracker.Parse
                     return;
                 }
 
+                var difficulty = DifficultyFor(zone);
                 var loaded = 0;
                 foreach (var job in jobs)
                 {
@@ -197,11 +203,21 @@ namespace BardSongTracker.Parse
                     }
 
                     var spec = SpecName(job);
-                    var points = await Curve(access, encounter, spec, partySize, partial =>
+                    var points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
                     {
                         Store(zone, boss, job, partial);
                         SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                     });
+                    if ((points == null || points.Count == 0) && dutyEncounter != 0 && dutyEncounter != encounter)
+                    {
+                        encounter = dutyEncounter;
+                        points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
+                        {
+                            Store(zone, boss, job, partial);
+                            SetStatus("Parse curve loaded for " + boss.Trim() + ".");
+                        });
+                    }
+
                     if (points == null || points.Count == 0)
                         continue;
 
@@ -520,11 +536,26 @@ namespace BardSongTracker.Parse
             }
         }
 
-        private async Task<List<PercentileScale.Point>?> Curve(string access, int encounterId, string spec, int partySize, Action<List<PercentileScale.Point>>? publish)
+        private static int DifficultyFor(string zone)
         {
-            var first = await Page(access, encounterId, spec, partySize, 1, 0);
+            if (zone.Contains("Savage", StringComparison.OrdinalIgnoreCase))
+                return 101;
+            if (zone.Contains("Ultimate", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Extreme", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Unreal", StringComparison.OrdinalIgnoreCase)
+                || zone.Contains("Ballad", StringComparison.OrdinalIgnoreCase))
+                return 100;
+
+            return 0;
+        }
+
+        private async Task<List<PercentileScale.Point>?> Curve(string access, int encounterId, string spec, int partySize, int difficulty, Action<List<PercentileScale.Point>>? publish)
+        {
+            var first = await Page(access, encounterId, spec, partySize, 1, 0, difficulty);
+            if ((first.Rankings.Count == 0 || first.Count <= 0) && difficulty != 0)
+                first = await Page(access, encounterId, spec, 0, 1, 0, 0);
             if (first.Rankings.Count == 0 || first.Count <= 0)
-                first = await Page(access, encounterId, spec, 0, 1, -1);
+                first = await Page(access, encounterId, spec, 0, 1, -1, 0);
             if (first.Rankings.Count == 0 || first.Count <= 0)
                 return null;
 
@@ -550,7 +581,7 @@ namespace BardSongTracker.Parse
                 {
                     try
                     {
-                        await RememberPages(access, encounterId, spec, first.UsedSize, first.Partition, pages, amounts);
+                        await RememberPages(access, encounterId, spec, first.UsedSize, first.Partition, first.Difficulty, pages, amounts);
                     }
                     catch (Exception)
                     {
@@ -589,17 +620,18 @@ namespace BardSongTracker.Parse
             });
         }
 
-        private async Task RememberPages(string access, int encounterId, string spec, int partySize, int partition, List<int> pages, Dictionary<int, double> amounts)
+        private async Task RememberPages(string access, int encounterId, string spec, int partySize, int partition, int difficulty, List<int> pages, Dictionary<int, double> amounts)
         {
             var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
             var partitionArgument = partition == -1 ? ", partition: -1" : "";
+            var difficultyArgument = difficulty > 0 ? ", difficulty: " + difficulty.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
             var query = new StringBuilder();
             query.Append("query { worldData { encounter(id: ").Append(encounterId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(") {");
             foreach (var page in pages)
             {
                 query.Append(" p").Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 query.Append(": characterRankings(specName: \"").Append(spec).Append("\", metric: rdps, page: ");
-                query.Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(partitionArgument).Append(sizeArgument).Append(')');
+                query.Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(difficultyArgument).Append(partitionArgument).Append(sizeArgument).Append(')');
             }
 
             query.Append(" } } }");
@@ -618,7 +650,7 @@ namespace BardSongTracker.Parse
                     if (!encounter.TryGetProperty(alias, out var rankings))
                         continue;
 
-                    var pageData = new RankPage { Page = page, UsedSize = partySize, Partition = partition };
+                    var pageData = new RankPage { Page = page, UsedSize = partySize, Partition = partition, Difficulty = difficulty };
                     if (rankings.ValueKind == JsonValueKind.String)
                     {
                         using var inner = JsonDocument.Parse(rankings.GetString() ?? "{}");
@@ -635,7 +667,7 @@ namespace BardSongTracker.Parse
             catch (Exception)
             {
                 foreach (var page in pages)
-                    Remember(await Page(access, encounterId, spec, partySize, page, partition), amounts);
+                    Remember(await Page(access, encounterId, spec, partySize, page, partition, difficulty), amounts);
             }
         }
 
@@ -665,15 +697,16 @@ namespace BardSongTracker.Parse
             return rank;
         }
 
-        private async Task<RankPage> Page(string access, int encounterId, string spec, int partySize, int page, int partition)
+        private async Task<RankPage> Page(string access, int encounterId, string spec, int partySize, int page, int partition, int difficulty)
         {
             var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
             var partitionArgument = partition == -1 ? ", partition: -1" : "";
+            var difficultyArgument = difficulty > 0 ? ", difficulty: " + difficulty.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
             var query = $$"""
                 query {
                   worldData {
                     encounter(id: {{encounterId}}) {
-                      characterRankings(specName: "{{spec}}", metric: rdps, page: {{page}}{{partitionArgument}}{{sizeArgument}})
+                      characterRankings(specName: "{{spec}}", metric: rdps, page: {{page}}{{difficultyArgument}}{{partitionArgument}}{{sizeArgument}})
                     }
                   }
                 }
@@ -683,14 +716,14 @@ namespace BardSongTracker.Parse
             {
                 json = await Graph(access, query);
             }
-            catch (InvalidOperationException) when (partySize > 0)
+            catch (InvalidOperationException) when (partySize > 0 || difficulty > 0)
             {
-                return await Page(access, encounterId, spec, 0, page, partition);
+                return await Page(access, encounterId, spec, 0, page, partition, 0);
             }
 
             using (json)
             {
-            var pageData = new RankPage { Page = page, UsedSize = partySize, Partition = partition };
+            var pageData = new RankPage { Page = page, UsedSize = partySize, Partition = partition, Difficulty = difficulty };
             if (!json.RootElement.TryGetProperty("data", out var data)
                 || !data.TryGetProperty("worldData", out var world)
                 || !world.TryGetProperty("encounter", out var encounter)
@@ -709,7 +742,7 @@ namespace BardSongTracker.Parse
             }
 
             if (pageData.Rankings.Count == 0 && partySize > 0)
-                return await Page(access, encounterId, spec, 0, page, partition);
+                return await Page(access, encounterId, spec, 0, page, partition, difficulty);
 
             return pageData;
             }
@@ -892,6 +925,7 @@ namespace BardSongTracker.Parse
             public int Count;
             public int UsedSize;
             public int Partition;
+            public int Difficulty;
             public bool HasMore;
             public List<RankRow> Rankings = new();
         }

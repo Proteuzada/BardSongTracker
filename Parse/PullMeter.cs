@@ -235,10 +235,10 @@ namespace BardSongTracker.Parse
             if (fields[3].Length > 0)
                 actor.Name = fields[3];
 
-            // AddCombatant writes the job in decimal, the same as PlayerStats: 23 is Bard.
-            var job = ParseJob(fields[4]);
-            if (job is > 0)
-                actor.JobId = job.Value;
+            // AddCombatant writes the job in hexadecimal: 17 is Bard, 19 is Black Mage, 1E is Ninja.
+            // PlayerStats (line 12) and CombatantMemory (line 261) write that same id in decimal.
+            if (TryParseHexJob(fields[4], out var job))
+                actor.JobId = job;
             if (fields.Length > 5 && ParseInt(fields[5]) is int level and > 0 and <= 100)
                 actor.Level = level;
 
@@ -559,6 +559,15 @@ namespace BardSongTracker.Parse
                 return job;
 
             return null;
+        }
+
+        private static bool TryParseHexJob(string text, out int job)
+        {
+            if (int.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out job) && job is > 0 and <= 63)
+                return true;
+
+            job = 0;
+            return false;
         }
 
         private static string CreditName(string[] fields, string creditId, string sourceId)

@@ -68,7 +68,11 @@ namespace BardSongTracker.Parse
                         continue;
                     if (fit < dutyFit)
                         continue;
-                    if (fit == dutyFit && (zoneScore < bestScore || (zoneScore == bestScore && encounter.Name.Length >= dutyLength)))
+                    if (fit == dutyFit && zoneScore < bestScore)
+                        continue;
+                    if (fit == dutyFit && zoneScore == bestScore && encounter.Name.Length > dutyLength)
+                        continue;
+                    if (fit == dutyFit && zoneScore == bestScore && encounter.Name.Length == dutyLength && encounter.Id <= byDuty)
                         continue;
 
                     dutyFit = fit;
@@ -232,6 +236,19 @@ namespace BardSongTracker.Parse
                 return "dancing catalog";
             if (Pick("The Dead Ends", "Aetheric Void", catalog) != 0)
                 return "catalog trash";
+
+            var currentLegacy = Zone("Ultimates (Legacy)",
+                (1073, "The Unending Coil of Bahamut"),
+                (1074, "The Weapon's Refrain"),
+                (1075, "The Epic of Alexander"),
+                (1076, "Dragonsong's Reprise"),
+                (1077, "The Omega Protocol"));
+            var dancingNow = Zone("Dancing Mad", (1085, "Dancing Mad"));
+            var moved = new List<ZoneNames> { legacy, currentLegacy, dancing, dancingNow, alexander };
+            if (Pick("The Epic of Alexander (Ultimate)", "Living Liquid", moved) != 1075)
+                return "tea current";
+            if (Pick("Dancing Mad (Ultimate)", "Kefka", new List<ZoneNames> { dancingNow }) != 1085)
+                return "dancing whole";
 
             return null;
         }
@@ -426,7 +443,11 @@ namespace BardSongTracker.Parse
         private static void Consider(int total, EncounterName encounter, ref int bestScore, ref int bestLength, ref int bestId)
         {
             var length = encounter.Name.Length;
-            if (total < bestScore || (total == bestScore && length >= bestLength))
+            if (total < bestScore)
+                return;
+            if (total == bestScore && length > bestLength)
+                return;
+            if (total == bestScore && length == bestLength && encounter.Id <= bestId)
                 return;
 
             bestScore = total;
