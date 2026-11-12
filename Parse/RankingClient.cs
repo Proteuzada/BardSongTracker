@@ -128,6 +128,9 @@ namespace BardSongTracker.Parse
             }
 
             var bossName = string.IsNullOrWhiteSpace(snap.BossName) ? snap.ZoneName.Trim() : snap.BossName.Trim();
+            var ladders = PhasePlan.Names(snap.ZoneName);
+            if (ladders.Length == 0)
+                ladders = new[] { bossName };
 
             var jobs = new List<int>();
             foreach (var row in snap.Rows)
@@ -153,22 +156,28 @@ namespace BardSongTracker.Parse
             if (yours > 0 && jobs.Remove(yours))
                 jobs.Insert(0, yours);
             var rankedSize = snap.PartySize >= 24 ? 24 : snap.PartySize >= 8 ? 8 : 0;
-            var key = snap.ZoneName + "|" + bossName + "|" + rankedSize + "|" + string.Join(",", jobs);
+            var bossKey = string.Join("/", ladders);
+            var key = snap.ZoneName + "|" + bossKey + "|" + rankedSize + "|" + string.Join(",", jobs);
             if (key == attemptKey && DateTimeOffset.UtcNow < retryAfter)
                 return;
 
             var missing = false;
-            foreach (var job in jobs)
+            foreach (var ladder in ladders)
             {
-                if (!table.TryFresh(snap.ZoneName, bossName, job, TimeSpan.FromHours(12), out _))
-                    missing = true;
+                foreach (var job in jobs)
+                {
+                    if (!table.TryFresh(snap.ZoneName, ladder, job, TimeSpan.FromHours(12), out _))
+                        missing = true;
+                }
             }
 
             if (!missing)
             {
                 attemptKey = key;
                 retryAfter = DateTimeOffset.UtcNow.AddHours(12);
-                SetStatus("Parse curve loaded for " + bossName + ".");
+                SetStatus(ladders.Length > 1
+                    ? "Parse curve loaded for " + snap.ZoneName.Trim() + "."
+                    : "Parse curve loaded for " + bossName + ".");
                 return;
             }
 
@@ -176,84 +185,96 @@ namespace BardSongTracker.Parse
                 return;
 
             var zone = snap.ZoneName;
-            var boss = bossName;
-            SetStatus("Loading the FF Logs curve for " + boss + ".");
-            Task.Run(() => Fetch(zone, boss, rankedSize, jobs, id, secret, key));
+            var label = ladders.Length > 1 ? snap.ZoneName.Trim() : bossName;
+            SetStatus("Loading the FF Logs curve for " + label + ".");
+            Task.Run(() => Fetch(zone, ladders, rankedSize, jobs, id, secret, key));
         }
 
-        private async Task Fetch(string zone, string boss, int partySize, List<int> jobs, string clientId, string clientSecret, string key)
+        private async Task Fetch(string zone, IReadOnlyList<string> bosses, int partySize, List<int> jobs, string clientId, string clientSecret, string key)
         {
             try
             {
                 var access = await Token(clientId, clientSecret);
                 MarkConnected();
                 EncounterMatch.TryFind(zone, out var knownId, out var knownDifficulty);
-                var catalogId = 0;
-                try
-                {
-                    catalogId = await FindEncounter(access, zone, boss);
-                }
-                catch (Exception) when (knownId != 0)
-                {
-                }
-
-                // Each part of a split duty has its own ladder. The whole-duty id
-                // is a different fight, so it is not a stand-in for one part.
-                var split = PhasePlan.IsSplit(zone, boss);
-                if (split && knownId != 0 && catalogId == knownId)
-                    catalogId = 0;
-                var encounter = catalogId != 0 ? catalogId : (split ? 0 : knownId);
-                if (encounter == 0)
-                {
-                    attemptKey = key;
-                    retryAfter = DateTimeOffset.UtcNow.AddMinutes(10);
-                    SetStatus("FF Logs has no encounter matching " + boss.Trim() + " in " + zone.Trim() + ".");
-                    return;
-                }
-
-                var difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
                 var loaded = 0;
-                foreach (var job in jobs)
+                var wanted = 0;
+                string? missed = null;
+                foreach (var boss in bosses)
                 {
-                    if (table.TryFresh(zone, boss, job, TimeSpan.FromHours(12), out _))
+                    var catalogId = 0;
+                    try
                     {
-                        loaded++;
+                        catalogId = await FindEncounter(access, zone, boss);
+                    }
+                    catch (Exception) when (knownId != 0)
+                    {
+                    }
+
+                    // Each part of a split duty has its own ladder. The whole-duty id
+                    // is a different fight, so it is not a stand-in for one part.
+                    var split = PhasePlan.IsSplit(zone, boss);
+                    if (split && knownId != 0 && catalogId == knownId)
+                        catalogId = 0;
+                    var encounter = catalogId != 0 ? catalogId : (split ? 0 : knownId);
+                    if (encounter == 0)
+                    {
+                        missed = boss;
                         continue;
                     }
 
-                    var spec = SpecName(job);
-                    var points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
+                    var difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
+                    foreach (var job in jobs)
                     {
-                        Store(zone, boss, job, partial);
-                        SetStatus("Parse curve loaded for " + boss.Trim() + ".");
-                    });
-                    if (!split && (points == null || points.Count == 0) && knownId != 0 && knownId != encounter)
-                    {
-                        encounter = knownId;
-                        difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
-                        points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
+                        wanted++;
+                        if (table.TryFresh(zone, boss, job, TimeSpan.FromHours(12), out _))
+                        {
+                            loaded++;
+                            continue;
+                        }
+
+                        var spec = SpecName(job);
+                        var points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
                         {
                             Store(zone, boss, job, partial);
                             SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                         });
+                        if (!split && (points == null || points.Count == 0) && knownId != 0 && knownId != encounter)
+                        {
+                            encounter = knownId;
+                            difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
+                            points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
+                            {
+                                Store(zone, boss, job, partial);
+                                SetStatus("Parse curve loaded for " + boss.Trim() + ".");
+                            });
+                        }
+
+                        if (points == null || points.Count == 0)
+                            continue;
+
+                        Store(zone, boss, job, points);
+                        loaded++;
+                        SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                     }
-
-                    if (points == null || points.Count == 0)
-                        continue;
-
-                    Store(zone, boss, job, points);
-                    loaded++;
-                    SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                 }
 
                 if (!string.IsNullOrWhiteSpace(cachePath))
                     table.Save(cachePath);
 
+                var label = bosses.Count > 1 ? zone.Trim() : (bosses.Count > 0 ? bosses[0].Trim() : zone.Trim());
                 attemptKey = key;
-                retryAfter = loaded > 0 ? DateTimeOffset.UtcNow.AddHours(12) : DateTimeOffset.UtcNow.AddMinutes(2);
-                SetStatus(loaded > 0
-                    ? "Parse curve loaded for " + boss.Trim() + "."
-                    : "FF Logs returned no ranking curve for " + boss.Trim() + ".");
+                retryAfter = missed == null && loaded >= wanted && wanted > 0
+                    ? DateTimeOffset.UtcNow.AddHours(12)
+                    : loaded > 0
+                        ? DateTimeOffset.UtcNow.AddMinutes(10)
+                        : DateTimeOffset.UtcNow.AddMinutes(2);
+                if (loaded > 0)
+                    SetStatus("Parse curve loaded for " + label + ".");
+                else if (missed != null)
+                    SetStatus("FF Logs has no encounter matching " + missed.Trim() + " in " + zone.Trim() + ".");
+                else
+                    SetStatus("FF Logs returned no ranking curve for " + label + ".");
             }
             catch (Exception ex)
             {

@@ -161,6 +161,18 @@ namespace BardSongTracker.Parse
             new("Golden Bahamut", None, None, new[] { new Cue("Golden Bahamut", minPhase: 2) }),
         };
 
+        public static string[] Names(string zone)
+        {
+            var steps = Steps(zone);
+            if (steps == null)
+                return System.Array.Empty<string>();
+
+            var names = new string[steps.Length];
+            for (var i = 0; i < steps.Length; i++)
+                names[i] = steps[i].Ladder;
+            return names;
+        }
+
         public static string Ladder(string zone, int phase)
         {
             var steps = Steps(zone);
@@ -232,6 +244,12 @@ namespace BardSongTracker.Parse
 
         public static string? SelfCheck()
         {
+            if (Names("Dancing Mad (Ultimate)").Length != 5)
+                return "dancing names";
+            if (Names("The Omega Protocol (Ultimate)").Length != 6)
+                return "top names";
+            if (Names("The Dead Ends").Length != 0)
+                return "dungeon names";
             if (Ladder("Dancing Mad (Ultimate)", 0) != "Kefka")
                 return "p1 name";
             if (Ladder("Dancing Mad (Ultimate)", 4) != "Ultima Kefka")
