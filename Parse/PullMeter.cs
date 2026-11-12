@@ -782,8 +782,8 @@ namespace BardSongTracker.Parse
             var when = Stamp(fields, clock);
             if (fields.Length > 5)
             {
-                var next = PhasePlan.Signal(phaseIndex, fields.Length > 3 ? fields[3] : "", fields[5]);
-                if (next > phaseIndex && PhasePlan.Ladder(zoneName, 0).Length > 0)
+                var next = PhasePlan.Signal(zoneName, phaseIndex, fields.Length > 3 ? fields[3] : "", fields[5]);
+                if (next > phaseIndex)
                     CutTo(next, when);
             }
 
@@ -803,9 +803,9 @@ namespace BardSongTracker.Parse
             if (IsEnemy(targetId) && targetName.Length > 0)
                 enemyNames[targetId] = targetName;
 
-            var next = PhasePlan.Signal(phaseIndex, sourceName, "");
+            var next = PhasePlan.Signal(zoneName, phaseIndex, sourceName, "");
             if (next < 0)
-                next = PhasePlan.Signal(phaseIndex, targetName, "");
+                next = PhasePlan.Signal(zoneName, phaseIndex, targetName, "");
             if (next > phaseIndex)
                 CutTo(next, when);
         }
