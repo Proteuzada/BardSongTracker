@@ -21,7 +21,7 @@ namespace BardSongTracker.Parse
 
         private static HttpClient CreateHttp()
         {
-            var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var http = new HttpClient { Timeout = TimeSpan.FromSeconds(40) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("BardSongTracker");
             return http;
         }
@@ -171,6 +171,19 @@ namespace BardSongTracker.Parse
                 }
             }
 
+            if (missing && ladders.Length > 1)
+            {
+                var dutyReady = true;
+                foreach (var job in jobs)
+                {
+                    if (!table.TryFresh(snap.ZoneName, snap.ZoneName, job, TimeSpan.FromHours(12), out _))
+                        dutyReady = false;
+                }
+
+                if (dutyReady)
+                    missing = false;
+            }
+
             if (!missing)
             {
                 attemptKey = key;
@@ -200,6 +213,7 @@ namespace BardSongTracker.Parse
                 var loaded = 0;
                 var wanted = 0;
                 string? missed = null;
+                var targets = new List<(string Boss, int Encounter, bool Split)>();
                 foreach (var boss in bosses)
                 {
                     var catalogId = 0;
@@ -211,17 +225,30 @@ namespace BardSongTracker.Parse
                     {
                     }
 
-                    // Each part of a split duty has its own ladder. The whole-duty id
-                    // is a different fight, so it is not a stand-in for one part.
+                    // A named part keeps its own ladder. The whole-duty id is only
+                    // used when the site has no separate encounter for that part.
                     var split = PhasePlan.IsSplit(zone, boss);
-                    if (split && knownId != 0 && catalogId == knownId)
-                        catalogId = 0;
-                    var encounter = catalogId != 0 ? catalogId : (split ? 0 : knownId);
+                    if (split && knownId != 0 && (catalogId == 0 || catalogId == knownId))
+                        continue;
+
+                    var encounter = catalogId != 0 ? catalogId : knownId;
                     if (encounter == 0)
                     {
                         missed = boss;
                         continue;
                     }
+
+                    targets.Add((boss, encounter, split));
+                }
+
+                if (targets.Count == 0 && knownId != 0)
+                    targets.Add((zone, knownId, false));
+
+                foreach (var target in targets)
+                {
+                    var boss = target.Boss;
+                    var encounter = target.Encounter;
+                    var split = target.Split;
 
                     var difficulty = knownDifficulty != 0 ? knownDifficulty : DifficultyFor(zone);
                     foreach (var job in jobs)
@@ -281,9 +308,10 @@ namespace BardSongTracker.Parse
                 if (IsClientRejection(ex.Message))
                     SetClient(3, ex.Message);
 
+                var timedOut = ex is TaskCanceledException || ex.Message.Contains("HttpClient.Timeout", StringComparison.OrdinalIgnoreCase);
                 attemptKey = key;
-                retryAfter = DateTimeOffset.UtcNow.AddMinutes(2);
-                SetStatus(ex.Message);
+                retryAfter = DateTimeOffset.UtcNow.AddSeconds(timedOut ? 20 : 120);
+                SetStatus(timedOut ? "FF Logs did not answer in time. Trying again." : ex.Message);
             }
             finally
             {
@@ -360,10 +388,11 @@ namespace BardSongTracker.Parse
             {
                 lock (gate)
                 {
+                    var timedOut = ex is TaskCanceledException || ex.Message.Contains("HttpClient.Timeout", StringComparison.OrdinalIgnoreCase);
                     clientState = 3;
-                    clientLine = ex.Message;
-                    clientRetry = DateTimeOffset.UtcNow.AddMinutes(2);
-                    status = ex.Message;
+                    clientLine = timedOut ? "FF Logs did not answer in time. Trying again." : ex.Message;
+                    clientRetry = DateTimeOffset.UtcNow.AddSeconds(timedOut ? 20 : 120);
+                    status = clientLine;
                 }
             }
             finally

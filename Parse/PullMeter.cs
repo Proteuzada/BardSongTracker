@@ -926,6 +926,8 @@ namespace BardSongTracker.Parse
                 return shownParse.TryGetValue(actor.Id, out var held) ? held : -1;
 
             var blended = Blend(actor);
+            if (blended < 0 && rankings != null && rankings.TryMatch(zoneId, zoneName, zoneName, actor.JobId, out var whole))
+                blended = PercentileScale.Interpolate(wholeDps, whole.Points);
             if (blended >= 0)
                 shownParse[actor.Id] = blended;
             else if (shownParse.TryGetValue(actor.Id, out var held))
@@ -971,7 +973,7 @@ namespace BardSongTracker.Parse
             parse = -1;
             if (ladder.Length == 0 || rankings == null || rdps <= 0)
                 return false;
-            if (!rankings.TryDisplay(zoneId, zoneName, ladder, jobId, out var scale))
+            if (!rankings.TryMatch(zoneId, zoneName, ladder, jobId, out var scale))
                 return false;
 
             parse = PercentileScale.Interpolate(rdps, scale.Points);
