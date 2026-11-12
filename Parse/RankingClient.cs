@@ -16,8 +16,15 @@ namespace BardSongTracker.Parse
     /// </summary>
     public sealed class RankingClient
     {
-        private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
+        private static readonly HttpClient Http = CreateHttp();
         private static readonly int[] Marks = { 10, 25, 50, 75, 90, 95, 99, 100 };
+
+        private static HttpClient CreateHttp()
+        {
+            var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("BardSongTracker");
+            return http;
+        }
 
         private readonly string cachePath;
         private readonly RankingTable table;
@@ -85,8 +92,17 @@ namespace BardSongTracker.Parse
                         return "FF Logs client rejected";
                     if (status.StartsWith("Parse curve loaded", StringComparison.Ordinal))
                         return "FF Logs connected";
+                    if (status.StartsWith("Loading", StringComparison.Ordinal))
+                        return "Loading parse…";
+                    if (status.StartsWith("FF Logs has no encounter", StringComparison.Ordinal))
+                        return "No FF Logs encounter";
+                    if (status.StartsWith("FF Logs returned no ranking", StringComparison.Ordinal))
+                        return "No FF Logs curve";
+                    if (status.StartsWith("API client connected", StringComparison.Ordinal)
+                        || status.StartsWith("Add an FF Logs", StringComparison.Ordinal))
+                        return "FF Logs connected · parse pending";
 
-                    return "FF Logs connected · parse pending";
+                    return status.Length > 48 ? status[..48] : status;
                 }
             }
         }
@@ -102,8 +118,10 @@ namespace BardSongTracker.Parse
                 return;
             }
 
-            if (snap.Rows.Length == 0 || string.IsNullOrWhiteSpace(snap.ZoneName) || string.IsNullOrWhiteSpace(snap.BossName))
+            if (snap.Rows.Length == 0 || string.IsNullOrWhiteSpace(snap.ZoneName))
                 return;
+
+            var bossName = string.IsNullOrWhiteSpace(snap.BossName) ? snap.ZoneName.Trim() : snap.BossName.Trim();
 
             var jobs = new List<int>();
             foreach (var row in snap.Rows)
@@ -125,14 +143,15 @@ namespace BardSongTracker.Parse
 
             if (yours > 0 && jobs.Remove(yours))
                 jobs.Insert(0, yours);
-            var key = snap.ZoneName + "|" + snap.BossName + "|" + snap.PartySize + "|" + string.Join(",", jobs);
+            var rankedSize = snap.PartySize >= 24 ? 24 : snap.PartySize >= 8 ? 8 : 0;
+            var key = snap.ZoneName + "|" + bossName + "|" + rankedSize + "|" + string.Join(",", jobs);
             if (key == attemptKey && DateTimeOffset.UtcNow < retryAfter)
                 return;
 
             var missing = false;
             foreach (var job in jobs)
             {
-                if (!table.TryFresh(snap.ZoneName, snap.BossName, job, TimeSpan.FromHours(12), out _))
+                if (!table.TryFresh(snap.ZoneName, bossName, job, TimeSpan.FromHours(12), out _))
                     missing = true;
             }
 
@@ -140,7 +159,7 @@ namespace BardSongTracker.Parse
             {
                 attemptKey = key;
                 retryAfter = DateTimeOffset.UtcNow.AddHours(12);
-                SetStatus("Parse curve loaded for " + snap.BossName.Trim() + ".");
+                SetStatus("Parse curve loaded for " + bossName + ".");
                 return;
             }
 
@@ -148,10 +167,9 @@ namespace BardSongTracker.Parse
                 return;
 
             var zone = snap.ZoneName;
-            var boss = snap.BossName;
-            var size = snap.PartySize;
-            SetStatus("Loading the FF Logs curve for " + boss.Trim() + ".");
-            Task.Run(() => Fetch(zone, boss, size, jobs, id, secret, key));
+            var boss = bossName;
+            SetStatus("Loading the FF Logs curve for " + boss + ".");
+            Task.Run(() => Fetch(zone, boss, rankedSize, jobs, id, secret, key));
         }
 
         private async Task Fetch(string zone, string boss, int partySize, List<int> jobs, string clientId, string clientSecret, string key)
@@ -179,18 +197,15 @@ namespace BardSongTracker.Parse
                     }
 
                     var spec = SpecName(job);
-                    var points = await Curve(access, encounter, spec, partySize);
+                    var points = await Curve(access, encounter, spec, partySize, partial =>
+                    {
+                        Store(zone, boss, job, partial);
+                        SetStatus("Parse curve loaded for " + boss.Trim() + ".");
+                    });
                     if (points == null || points.Count == 0)
                         continue;
 
-                    table.Upsert(new RankingTable.Entry
-                    {
-                        ZoneName = zone.Trim(),
-                        Boss = boss.Trim(),
-                        JobId = job,
-                        FetchedAt = DateTimeOffset.UtcNow,
-                        Points = points,
-                    });
+                    Store(zone, boss, job, points);
                     loaded++;
                     SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                 }
@@ -373,12 +388,26 @@ namespace BardSongTracker.Parse
             if (zones.Count == 0)
                 await LoadZones(access);
 
+            var ready = PickLoaded(zoneName, bossName);
+            if (ready != 0)
+                return ready;
+
             foreach (var zone in zones)
             {
-                if (zone.Encounters.Count == 0 && zone.Id != 0 && NeedsEncounters(zone.Name, zoneName))
-                    await LoadEncounters(access, zone);
+                if (zone.Encounters.Count > 0 || zone.Id == 0 || !NeedsEncounters(zone.Name, zoneName))
+                    continue;
+
+                await LoadEncounters(access, zone);
+                ready = PickLoaded(zoneName, bossName);
+                if (ready != 0)
+                    return ready;
             }
 
+            return 0;
+        }
+
+        private int PickLoaded(string zoneName, string bossName)
+        {
             var matched = new List<EncounterMatch.ZoneNames>();
             foreach (var zone in zones)
             {
@@ -421,7 +450,7 @@ namespace BardSongTracker.Parse
                 if (ReadExpansions(json))
                     return;
             }
-            catch (InvalidOperationException)
+            catch (Exception)
             {
             }
 
@@ -491,16 +520,20 @@ namespace BardSongTracker.Parse
             }
         }
 
-        private async Task<List<PercentileScale.Point>?> Curve(string access, int encounterId, string spec, int partySize)
+        private async Task<List<PercentileScale.Point>?> Curve(string access, int encounterId, string spec, int partySize, Action<List<PercentileScale.Point>>? publish)
         {
-            var first = await Page(access, encounterId, spec, partySize, 1);
-            if (first.Count == 0)
-                first = await Page(access, encounterId, spec, 0, 1);
+            var first = await Page(access, encounterId, spec, partySize, 1, 0);
+            if (first.Rankings.Count == 0 || first.Count <= 0)
+                first = await Page(access, encounterId, spec, 0, 1, -1);
             if (first.Rankings.Count == 0 || first.Count <= 0)
                 return null;
 
             var amounts = new Dictionary<int, double>();
             Remember(first, amounts);
+            var early = BuildPoints(amounts, first.Count);
+            if (early != null)
+                publish?.Invoke(early);
+
             var pageSize = first.Rankings.Count;
             if (first.HasMore && pageSize > 0)
             {
@@ -514,14 +547,27 @@ namespace BardSongTracker.Parse
                 }
 
                 if (pages.Count > 0)
-                    await RememberPages(access, encounterId, spec, first.UsedSize, pages, amounts);
+                {
+                    try
+                    {
+                        await RememberPages(access, encounterId, spec, first.UsedSize, first.Partition, pages, amounts);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
             }
 
+            return BuildPoints(amounts, first.Count) ?? early;
+        }
+
+        private static List<PercentileScale.Point>? BuildPoints(Dictionary<int, double> amounts, int count)
+        {
             var points = new List<PercentileScale.Point> { new(0, 0) };
             foreach (var mark in Marks)
             {
-                var rank = RankFor(mark, first.Count);
-                if (!amounts.TryGetValue(rank, out var dps))
+                var rank = RankFor(mark, count);
+                if (!amounts.TryGetValue(rank, out var dps) || dps <= 0)
                     continue;
 
                 points.Add(new PercentileScale.Point(mark, dps));
@@ -531,16 +577,29 @@ namespace BardSongTracker.Parse
             return points.Count > 1 ? points : null;
         }
 
-        private async Task RememberPages(string access, int encounterId, string spec, int partySize, List<int> pages, Dictionary<int, double> amounts)
+        private void Store(string zone, string boss, int job, List<PercentileScale.Point> points)
+        {
+            table.Upsert(new RankingTable.Entry
+            {
+                ZoneName = zone.Trim(),
+                Boss = boss.Trim(),
+                JobId = job,
+                FetchedAt = DateTimeOffset.UtcNow,
+                Points = points,
+            });
+        }
+
+        private async Task RememberPages(string access, int encounterId, string spec, int partySize, int partition, List<int> pages, Dictionary<int, double> amounts)
         {
             var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+            var partitionArgument = partition == -1 ? ", partition: -1" : "";
             var query = new StringBuilder();
             query.Append("query { worldData { encounter(id: ").Append(encounterId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(") {");
             foreach (var page in pages)
             {
                 query.Append(" p").Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 query.Append(": characterRankings(specName: \"").Append(spec).Append("\", metric: rdps, page: ");
-                query.Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(sizeArgument).Append(')');
+                query.Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(partitionArgument).Append(sizeArgument).Append(')');
             }
 
             query.Append(" } } }");
@@ -559,7 +618,7 @@ namespace BardSongTracker.Parse
                     if (!encounter.TryGetProperty(alias, out var rankings))
                         continue;
 
-                    var pageData = new RankPage { Page = page, UsedSize = partySize };
+                    var pageData = new RankPage { Page = page, UsedSize = partySize, Partition = partition };
                     if (rankings.ValueKind == JsonValueKind.String)
                     {
                         using var inner = JsonDocument.Parse(rankings.GetString() ?? "{}");
@@ -576,7 +635,7 @@ namespace BardSongTracker.Parse
             catch (Exception)
             {
                 foreach (var page in pages)
-                    Remember(await Page(access, encounterId, spec, partySize, page), amounts);
+                    Remember(await Page(access, encounterId, spec, partySize, page, partition), amounts);
             }
         }
 
@@ -606,14 +665,15 @@ namespace BardSongTracker.Parse
             return rank;
         }
 
-        private async Task<RankPage> Page(string access, int encounterId, string spec, int partySize, int page)
+        private async Task<RankPage> Page(string access, int encounterId, string spec, int partySize, int page, int partition)
         {
             var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+            var partitionArgument = partition == -1 ? ", partition: -1" : "";
             var query = $$"""
                 query {
                   worldData {
                     encounter(id: {{encounterId}}) {
-                      characterRankings(specName: "{{spec}}", metric: rdps, page: {{page}}{{sizeArgument}})
+                      characterRankings(specName: "{{spec}}", metric: rdps, page: {{page}}{{partitionArgument}}{{sizeArgument}})
                     }
                   }
                 }
@@ -625,12 +685,12 @@ namespace BardSongTracker.Parse
             }
             catch (InvalidOperationException) when (partySize > 0)
             {
-                return await Page(access, encounterId, spec, 0, page);
+                return await Page(access, encounterId, spec, 0, page, partition);
             }
 
             using (json)
             {
-            var pageData = new RankPage { Page = page, UsedSize = partySize };
+            var pageData = new RankPage { Page = page, UsedSize = partySize, Partition = partition };
             if (!json.RootElement.TryGetProperty("data", out var data)
                 || !data.TryGetProperty("worldData", out var world)
                 || !world.TryGetProperty("encounter", out var encounter)
@@ -649,7 +709,7 @@ namespace BardSongTracker.Parse
             }
 
             if (pageData.Rankings.Count == 0 && partySize > 0)
-                return await Page(access, encounterId, spec, 0, page);
+                return await Page(access, encounterId, spec, 0, page, partition);
 
             return pageData;
             }
@@ -660,8 +720,13 @@ namespace BardSongTracker.Parse
             if (rankings.ValueKind != JsonValueKind.Object)
                 return;
 
-            if (rankings.TryGetProperty("count", out var count) && count.TryGetInt32(out var total))
-                page.Count = total;
+            if (rankings.TryGetProperty("count", out var count))
+            {
+                if (count.TryGetInt32(out var total))
+                    page.Count = total;
+                else if (count.TryGetDouble(out var totalDouble) && totalDouble > 0)
+                    page.Count = (int)totalDouble;
+            }
             if (rankings.TryGetProperty("hasMorePages", out var more))
                 page.HasMore = more.ValueKind == JsonValueKind.True;
             if (rankings.TryGetProperty("page", out var pageNumber) && pageNumber.TryGetInt32(out var parsedPage) && parsedPage > 0)
@@ -678,8 +743,13 @@ namespace BardSongTracker.Parse
                     amount = ReadDouble(totalValue);
 
                 var rank = 0;
-                if (row.TryGetProperty("rank", out var rankValue) && rankValue.TryGetInt32(out var parsedRank))
-                    rank = parsedRank;
+                if (row.TryGetProperty("rank", out var rankValue))
+                {
+                    if (rankValue.TryGetInt32(out var parsedRank))
+                        rank = parsedRank;
+                    else if (rankValue.TryGetDouble(out var parsedDouble) && parsedDouble > 0)
+                        rank = (int)parsedDouble;
+                }
 
                 page.Rankings.Add(new RankRow { Rank = rank, Amount = amount });
             }
@@ -710,7 +780,10 @@ namespace BardSongTracker.Parse
             using var response = await Http.SendAsync(request);
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException("FF Logs rankings could not be loaded.");
+            {
+                var detail = body.Length > 80 ? body[..80] : body;
+                throw new InvalidOperationException("FF Logs rankings could not be loaded (" + (int)response.StatusCode + "). " + detail);
+            }
 
             var json = JsonDocument.Parse(body);
             if (json.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array && errors.GetArrayLength() > 0)
@@ -818,6 +891,7 @@ namespace BardSongTracker.Parse
             public int Page = 1;
             public int Count;
             public int UsedSize;
+            public int Partition;
             public bool HasMore;
             public List<RankRow> Rankings = new();
         }
