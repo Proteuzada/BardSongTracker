@@ -128,6 +128,31 @@ namespace BardSongTracker.Parse
             return entry.FetchedAt > DateTimeOffset.MinValue && DateTimeOffset.UtcNow - entry.FetchedAt <= maxAge;
         }
 
+        public bool TryDisplay(string zoneId, string zoneName, string bossName, int jobId, out Entry entry)
+        {
+            if (TryMatch(zoneId, zoneName, bossName, jobId, out entry))
+                return true;
+
+            Entry? newest = null;
+            lock (entries)
+            {
+                foreach (var candidate in entries)
+                {
+                    if (jobId <= 0 || candidate.JobId != jobId)
+                        continue;
+                    if (candidate.Points.Count == 0)
+                        continue;
+                    if (!Same(candidate.ZoneName, zoneName))
+                        continue;
+                    if (newest == null || candidate.FetchedAt > newest.FetchedAt)
+                        newest = candidate;
+                }
+            }
+
+            entry = newest!;
+            return newest != null;
+        }
+
         public bool TryMatch(string zoneId, string zoneName, string bossName, int jobId, out Entry entry)
         {
             Entry? best = null;

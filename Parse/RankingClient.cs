@@ -116,6 +116,15 @@ namespace BardSongTracker.Parse
                 return;
 
             jobs.Sort();
+            var yours = 0;
+            foreach (var row in snap.Rows)
+            {
+                if (row.You && row.JobId > 0)
+                    yours = row.JobId;
+            }
+
+            if (yours > 0 && jobs.Remove(yours))
+                jobs.Insert(0, yours);
             var key = snap.ZoneName + "|" + snap.BossName + "|" + snap.PartySize + "|" + string.Join(",", jobs);
             if (key == attemptKey && DateTimeOffset.UtcNow < retryAfter)
                 return;
@@ -183,6 +192,7 @@ namespace BardSongTracker.Parse
                         Points = points,
                     });
                     loaded++;
+                    SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                 }
 
                 if (!string.IsNullOrWhiteSpace(cachePath))
@@ -494,17 +504,17 @@ namespace BardSongTracker.Parse
             var pageSize = first.Rankings.Count;
             if (first.HasMore && pageSize > 0)
             {
-                var pages = new HashSet<int>();
+                var pages = new List<int>();
                 foreach (var mark in Marks)
                 {
                     var rank = RankFor(mark, first.Count);
                     var page = ((rank - 1) / pageSize) + 1;
-                    if (page > 1)
+                    if (page > 1 && !pages.Contains(page))
                         pages.Add(page);
                 }
 
-                foreach (var page in pages)
-                    Remember(await Page(access, encounterId, spec, first.UsedSize, page), amounts);
+                if (pages.Count > 0)
+                    await RememberPages(access, encounterId, spec, first.UsedSize, pages, amounts);
             }
 
             var points = new List<PercentileScale.Point> { new(0, 0) };
@@ -519,6 +529,55 @@ namespace BardSongTracker.Parse
 
             points.Sort((left, right) => left.Dps.CompareTo(right.Dps));
             return points.Count > 1 ? points : null;
+        }
+
+        private async Task RememberPages(string access, int encounterId, string spec, int partySize, List<int> pages, Dictionary<int, double> amounts)
+        {
+            var sizeArgument = partySize > 0 ? ", size: " + partySize.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+            var query = new StringBuilder();
+            query.Append("query { worldData { encounter(id: ").Append(encounterId.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(") {");
+            foreach (var page in pages)
+            {
+                query.Append(" p").Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                query.Append(": characterRankings(specName: \"").Append(spec).Append("\", metric: rdps, page: ");
+                query.Append(page.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(sizeArgument).Append(')');
+            }
+
+            query.Append(" } } }");
+            try
+            {
+                using var json = await Graph(access, query.ToString());
+                if (!json.RootElement.TryGetProperty("data", out var data)
+                    || !data.TryGetProperty("worldData", out var world)
+                    || !world.TryGetProperty("encounter", out var encounter)
+                    || encounter.ValueKind != JsonValueKind.Object)
+                    throw new InvalidOperationException("FF Logs rankings could not be loaded.");
+
+                foreach (var page in pages)
+                {
+                    var alias = "p" + page.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    if (!encounter.TryGetProperty(alias, out var rankings))
+                        continue;
+
+                    var pageData = new RankPage { Page = page, UsedSize = partySize };
+                    if (rankings.ValueKind == JsonValueKind.String)
+                    {
+                        using var inner = JsonDocument.Parse(rankings.GetString() ?? "{}");
+                        ReadRankings(inner.RootElement, pageData);
+                    }
+                    else
+                    {
+                        ReadRankings(rankings, pageData);
+                    }
+
+                    Remember(pageData, amounts);
+                }
+            }
+            catch (Exception)
+            {
+                foreach (var page in pages)
+                    Remember(await Page(access, encounterId, spec, partySize, page), amounts);
+            }
         }
 
         private static void Remember(RankPage page, Dictionary<int, double> amounts)

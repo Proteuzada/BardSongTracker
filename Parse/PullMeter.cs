@@ -175,7 +175,7 @@ namespace BardSongTracker.Parse
             {
                 var row = snap.Rows[i];
                 var parse = row.Parse;
-                if (rankings.TryMatch(zoneId, snap.ZoneName, snap.BossName, row.JobId, out var scale))
+                if (rankings.TryDisplay(zoneId, snap.ZoneName, snap.BossName, row.JobId, out var scale))
                     parse = PercentileScale.Interpolate(row.Dps, scale.Points);
 
                 rows[i] = row with { Parse = parse };
@@ -879,7 +879,7 @@ namespace BardSongTracker.Parse
                 var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
                 DownTime(actor, duration, out var alive, out var dead);
                 var parse = -1;
-                if (rankings != null && rankings.TryMatch(zoneId, zoneName, boss, actor.JobId, out var scale))
+                if (rankings != null && rankings.TryDisplay(zoneId, zoneName, boss, actor.JobId, out var scale))
                     parse = PercentileScale.Interpolate(dps, scale.Points);
 
                 rows.Add(new MeterRow(
