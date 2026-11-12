@@ -197,7 +197,8 @@ namespace BardSongTracker.Parse
 
         private static bool IsIdentityLine(string line)
         {
-            return line.StartsWith("02|", StringComparison.Ordinal)
+            return line.StartsWith("01|", StringComparison.Ordinal)
+                || line.StartsWith("02|", StringComparison.Ordinal)
                 || line.StartsWith("03|", StringComparison.Ordinal)
                 || line.StartsWith("12|", StringComparison.Ordinal)
                 || line.StartsWith("261|", StringComparison.Ordinal);

@@ -249,9 +249,78 @@ namespace BardSongTracker.Parse
                 return "tea current";
             if (Pick("Dancing Mad (Ultimate)", "Kefka", new List<ZoneNames> { dancingNow }) != 1085)
                 return "dancing whole";
+            if (!TryFind("Dancing Mad (Ultimate)", out var dancingId, out var dancingDifficulty) || dancingId != 1085 || dancingDifficulty != 100)
+                return "known dancing";
+            if (!TryFind("The Epic of Alexander (Ultimate)", out var teaId, out _) || teaId != 1075)
+                return "known tea";
+            if (!TryFind("the Weapon's Refrain (Ultimate)", out var uwuId, out _) || uwuId != 1074)
+                return "known uwu";
+            if (!TryFind("the Unending Coil of Bahamut (Ultimate)", out var ucobId, out _) || ucobId != 1073)
+                return "known ucob";
+            if (!TryFind("Dragonsong's Reprise (Ultimate)", out var dsrId, out _) || dsrId != 1076)
+                return "known dsr";
+            if (!TryFind("the Omega Protocol (Ultimate)", out var topId, out _) || topId != 1077)
+                return "known top";
+            if (!TryFind("Futures Rewritten (Ultimate)", out var fruId, out _) || fruId != 1079)
+                return "known fru";
+            if (TryFind("The Dead Ends", out _, out _))
+                return "known trash";
 
             return null;
         }
+
+        /// <summary>
+        /// Current FF Logs encounter for a duty. Ultimates were copied onto new
+        /// ids; the old ids no longer have the live ranking curve.
+        /// </summary>
+        public static bool TryFind(string duty, out int encounterId, out int difficulty)
+        {
+            encounterId = 0;
+            difficulty = 0;
+            if (string.IsNullOrWhiteSpace(duty))
+                return false;
+
+            var dutyWords = Words(duty);
+            var best = 0;
+            foreach (var fight in KnownFights)
+            {
+                var words = Words(fight.Name);
+                if (words.Count < 2 || words.Count < best)
+                    continue;
+
+                var found = true;
+                foreach (var word in words)
+                {
+                    if (!dutyWords.Contains(word))
+                    {
+                        found = false;
+                        break;
+                    }
+                }
+
+                if (!found)
+                    continue;
+
+                best = words.Count;
+                encounterId = fight.Id;
+                difficulty = fight.Difficulty;
+            }
+
+            return encounterId != 0;
+        }
+
+        private readonly record struct KnownFight(string Name, int Id, int Difficulty);
+
+        private static readonly KnownFight[] KnownFights =
+        {
+            new("Dancing Mad", 1085, 100),
+            new("Futures Rewritten", 1079, 100),
+            new("The Omega Protocol", 1077, 100),
+            new("Dragonsong's Reprise", 1076, 100),
+            new("The Epic of Alexander", 1075, 100),
+            new("The Weapon's Refrain", 1074, 100),
+            new("The Unending Coil of Bahamut", 1073, 100),
+        };
 
         private static int ZoneScore(string zone, string duty)
         {

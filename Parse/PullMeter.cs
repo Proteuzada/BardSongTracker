@@ -110,6 +110,9 @@ namespace BardSongTracker.Parse
             var fields = line.Split('|');
             switch (line[..split])
             {
+                case "01":
+                    ApplyZone(fields);
+                    break;
                 case "02":
                     ApplyPlayer(fields);
                     break;

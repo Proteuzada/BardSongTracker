@@ -118,8 +118,14 @@ namespace BardSongTracker.Parse
                 return;
             }
 
-            if (snap.Rows.Length == 0 || string.IsNullOrWhiteSpace(snap.ZoneName))
+            if (snap.Rows.Length == 0)
                 return;
+
+            if (string.IsNullOrWhiteSpace(snap.ZoneName))
+            {
+                SetStatus("Waiting for the duty name in the ACT log.");
+                return;
+            }
 
             var bossName = string.IsNullOrWhiteSpace(snap.BossName) ? snap.ZoneName.Trim() : snap.BossName.Trim();
 
@@ -131,7 +137,10 @@ namespace BardSongTracker.Parse
             }
 
             if (jobs.Count == 0)
+            {
+                SetStatus("Waiting for a job id in the ACT log.");
                 return;
+            }
 
             jobs.Sort();
             var yours = 0;
@@ -178,12 +187,17 @@ namespace BardSongTracker.Parse
             {
                 var access = await Token(clientId, clientSecret);
                 MarkConnected();
-                var encounter = await FindEncounter(access, zone, boss);
-                var dutyEncounter = string.Equals(boss.Trim(), zone.Trim(), StringComparison.OrdinalIgnoreCase)
-                    ? encounter
-                    : await FindEncounter(access, zone, zone);
-                if (encounter == 0)
-                    encounter = dutyEncounter;
+                EncounterMatch.TryFind(zone, out var knownId, out var knownDifficulty);
+                var catalogId = 0;
+                try
+                {
+                    catalogId = await FindEncounter(access, zone, boss);
+                }
+                catch (Exception) when (knownId != 0)
+                {
+                }
+
+                var encounter = knownId != 0 ? knownId : catalogId;
                 if (encounter == 0)
                 {
                     attemptKey = key;
@@ -192,7 +206,7 @@ namespace BardSongTracker.Parse
                     return;
                 }
 
-                var difficulty = DifficultyFor(zone);
+                var difficulty = knownId != 0 ? knownDifficulty : DifficultyFor(zone);
                 var loaded = 0;
                 foreach (var job in jobs)
                 {
@@ -208,9 +222,10 @@ namespace BardSongTracker.Parse
                         Store(zone, boss, job, partial);
                         SetStatus("Parse curve loaded for " + boss.Trim() + ".");
                     });
-                    if ((points == null || points.Count == 0) && dutyEncounter != 0 && dutyEncounter != encounter)
+                    if ((points == null || points.Count == 0) && catalogId != 0 && catalogId != encounter)
                     {
-                        encounter = dutyEncounter;
+                        encounter = catalogId;
+                        difficulty = DifficultyFor(zone);
                         points = await Curve(access, encounter, spec, partySize, difficulty, partial =>
                         {
                             Store(zone, boss, job, partial);
@@ -517,7 +532,7 @@ namespace BardSongTracker.Parse
             {
                 var info = new ZoneInfo
                 {
-                    Id = zone.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
+                    Id = zone.TryGetProperty("id", out var id) ? ReadId(id) : 0,
                     Name = zone.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                 };
                 if (zone.TryGetProperty("encounters", out var encounters) && encounters.ValueKind == JsonValueKind.Array)
@@ -526,7 +541,7 @@ namespace BardSongTracker.Parse
                     {
                         info.Encounters.Add(new EncounterInfo
                         {
-                            Id = encounter.TryGetProperty("id", out var encounterId) ? encounterId.GetInt32() : 0,
+                            Id = encounter.TryGetProperty("id", out var encounterId) ? ReadId(encounterId) : 0,
                             Name = encounter.TryGetProperty("name", out var encounterName) ? encounterName.GetString() ?? "" : "",
                         });
                     }
@@ -534,6 +549,17 @@ namespace BardSongTracker.Parse
 
                 zones.Add(info);
             }
+        }
+
+        private static int ReadId(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var value))
+                return value;
+            if (element.ValueKind == JsonValueKind.String
+                && int.TryParse(element.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+
+            return 0;
         }
 
         private static int DifficultyFor(string zone)
@@ -860,7 +886,7 @@ namespace BardSongTracker.Parse
                 {
                     zone.Encounters.Add(new EncounterInfo
                     {
-                        Id = encounter.TryGetProperty("id", out var encounterId) ? encounterId.GetInt32() : 0,
+                        Id = encounter.TryGetProperty("id", out var encounterId) ? ReadId(encounterId) : 0,
                         Name = encounter.TryGetProperty("name", out var encounterName) ? encounterName.GetString() ?? "" : "",
                     });
                 }
