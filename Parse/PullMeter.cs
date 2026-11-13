@@ -25,13 +25,10 @@ namespace BardSongTracker.Parse
         private readonly HashSet<string> phaseDown = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, double> phaseCreditAt = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> phaseDamageAt = new(StringComparer.OrdinalIgnoreCase);
-        private readonly List<PhaseSlice> phases = new();
-        private readonly Dictionary<string, int> shownParse = new(StringComparer.OrdinalIgnoreCase);
         private int phaseIndex;
         private bool phaseOpen;
         private bool phaseLatched;
         private DateTimeOffset phaseStart;
-        private DateTimeOffset parseDue;
         private readonly List<BuffWindow> buffs = new();
         private readonly List<RdpsMath.External> externalScratch = new();
         private RankingTable? rankings;
@@ -492,7 +489,7 @@ namespace BardSongTracker.Parse
                 return;
 
             combatIdle = true;
-            if (PhasePlan.Ladder(zoneName, 0).Length > 0 && (phaseIndex > 0 || phaseOpen || phases.Count > 0))
+            if (PhasePlan.Ladder(zoneName, 0).Length > 0 && (phaseIndex > 0 || phaseOpen))
                 return;
             if (pullSealed || !HasDamage() || killedEnemies.Count > 0 || vanished.Count > 0 || !LivingEnemiesReset())
                 return;
@@ -839,9 +836,8 @@ namespace BardSongTracker.Parse
             if (next <= phaseIndex)
                 return;
 
-            // The part is stored for the parse. Damage, the clock, and the
-            // number on the meter keep running across the whole pull.
-            ClosePhase(when);
+            // Damage and rDPS keep running. The percent follows the part that just opened.
+            ClosePhase();
             phaseDown.Clear();
             phaseIndex = next;
             phaseLatched = true;
@@ -864,29 +860,9 @@ namespace BardSongTracker.Parse
             }
         }
 
-        private void ClosePhase(DateTimeOffset when)
+        private void ClosePhase()
         {
-            if (!phaseOpen)
-                return;
-
-            var seconds = when > phaseStart ? (when - phaseStart).TotalSeconds : 0;
-            var ladder = PhasePlan.Ladder(zoneName, phaseIndex);
             phaseOpen = false;
-            if (seconds < 1 || ladder.Length == 0)
-                return;
-
-            var slice = new PhaseSlice { Ladder = ladder, Seconds = seconds };
-            foreach (var actor in actors.Values)
-            {
-                var credit = PhaseCredit(actor);
-                if (credit <= 0)
-                    continue;
-
-                slice.Credit[actor.Id] = credit;
-            }
-
-            if (slice.Credit.Count > 0)
-                phases.Add(slice);
         }
 
         private double PhaseCredit(Actor actor)
@@ -901,19 +877,16 @@ namespace BardSongTracker.Parse
 
         private void ResetPhases()
         {
-            phases.Clear();
             phaseCreditAt.Clear();
             phaseDamageAt.Clear();
-            shownParse.Clear();
             phaseDown.Clear();
             phaseIndex = 0;
             phaseOpen = false;
             phaseLatched = false;
             phaseStart = default;
-            parseDue = default;
         }
 
-        private int ParseFor(Actor actor, double wholeDps, string boss, bool refresh)
+        private int ParseFor(Actor actor, double wholeDps, string boss)
         {
             if (PhasePlan.SingleLadder(zoneName) || PhasePlan.Ladder(zoneName, 0).Length == 0)
             {
@@ -923,50 +896,18 @@ namespace BardSongTracker.Parse
                 return -1;
             }
 
-            if (!refresh)
-                return shownParse.TryGetValue(actor.Id, out var held) ? held : -1;
-
-            var blended = Blend(actor);
-            if (blended < 0 && rankings != null && rankings.TryMatch(zoneId, zoneName, zoneName, actor.JobId, out var whole))
-                blended = PercentileScale.Interpolate(wholeDps, whole.Points);
-            if (blended >= 0)
-                shownParse[actor.Id] = blended;
-            else if (shownParse.TryGetValue(actor.Id, out var held))
-                return held;
-
-            return blended;
-        }
-
-        private int Blend(Actor actor)
-        {
-            double weight = 0;
-            double sum = 0;
-            var closed = false;
-            foreach (var slice in phases)
-            {
-                if (slice.Seconds < 8 || !slice.Credit.TryGetValue(actor.Id, out var credit) || credit <= 0)
-                    continue;
-                if (!Score(slice.Ladder, credit / slice.Seconds, actor.JobId, out var parse))
-                    continue;
-
-                closed = true;
-                weight += slice.Seconds;
-                sum += parse * slice.Seconds;
-            }
-
+            // The Gold estimate is the current part's rDPS on that part's cached ladder.
             if (phaseOpen)
             {
                 var seconds = lastEvent > phaseStart ? (lastEvent - phaseStart).TotalSeconds : 0;
                 var credit = PhaseCredit(actor);
-                var ready = seconds >= (closed ? 15 : 8);
-                if (ready && credit > 0 && Score(PhasePlan.Ladder(zoneName, phaseIndex), credit / seconds, actor.JobId, out var parse))
-                {
-                    weight += seconds;
-                    sum += parse * seconds;
-                }
+                if (seconds >= 1 && credit > 0 && Score(PhasePlan.Ladder(zoneName, phaseIndex), credit / seconds, actor.JobId, out var live))
+                    return live;
             }
 
-            return weight > 0 ? (int)(sum / weight) : -1;
+            if (rankings != null && rankings.TryMatch(zoneId, zoneName, zoneName, actor.JobId, out var whole))
+                return PercentileScale.Interpolate(wholeDps, whole.Points);
+            return -1;
         }
 
         private bool Score(string ladder, double rdps, int jobId, out int parse)
@@ -1105,9 +1046,7 @@ namespace BardSongTracker.Parse
             }
 
             var boss = BossName();
-            var refresh = DateTimeOffset.UtcNow >= parseDue;
             var rows = new List<MeterRow>();
-            var scored = false;
             foreach (var actor in actors.Values)
             {
                 if (actor.Damage <= 0)
@@ -1117,9 +1056,7 @@ namespace BardSongTracker.Parse
                 var dps = raid / seconds;
                 var share = total > 0 ? (float)(actor.Damage * 100d / total) : 0f;
                 DownTime(actor, duration, out var alive, out var dead);
-                var parse = ParseFor(actor, dps, boss, refresh);
-                if (parse >= 0)
-                    scored = true;
+                var parse = ParseFor(actor, dps, boss);
 
                 rows.Add(new MeterRow(
                     actor.Name.Length == 0 ? "Player" : actor.Name,
@@ -1138,9 +1075,6 @@ namespace BardSongTracker.Parse
                     dead,
                     parse));
             }
-
-            if (refresh)
-                parseDue = DateTimeOffset.UtcNow.AddSeconds(scored ? 10 : 2);
 
             rows.Sort(static (left, right) => right.Dps.CompareTo(left.Dps));
             if (!string.IsNullOrEmpty(error))
@@ -1217,13 +1151,6 @@ namespace BardSongTracker.Parse
             public int DirectStat;
             public bool HasStats;
             public double RaidCredit;
-        }
-
-        private sealed class PhaseSlice
-        {
-            public string Ladder = "";
-            public double Seconds;
-            public Dictionary<string, double> Credit = new(StringComparer.OrdinalIgnoreCase);
         }
 
         private readonly record struct BuffWindow(
