@@ -45,6 +45,13 @@ namespace BardSongTracker
         public string RankingsPath { get; set; } = "";
         public float PullIdleSeconds { get; set; } = 25f;
 
+        public bool NinjaMudraKeys { get; set; } = true;
+
+        /// <summary>
+        /// Virtual key code for each ninjutsu id. Zero means the jutsu has no key.
+        /// </summary>
+        public Dictionary<string, int> NinjaMudraKey { get; set; } = new();
+
         /// <summary>
         /// Skill ids the player turned off. Missing ids stay enabled, so new skills
         /// show up without wiping an old config.
@@ -62,6 +69,36 @@ namespace BardSongTracker
         public void Save()
         {
             this.PluginInterface!.SavePluginConfig(this);
+        }
+
+        public int MudraKey(string jutsuId)
+        {
+            if (NinjaMudraKey != null && NinjaMudraKey.TryGetValue(jutsuId, out var key))
+                return key;
+            return 0;
+        }
+
+        public void SetMudraKey(string jutsuId, int key)
+        {
+            NinjaMudraKey ??= new Dictionary<string, int>();
+            if (key != 0)
+            {
+                var taken = new List<string>();
+                foreach (var pair in NinjaMudraKey)
+                {
+                    if (pair.Value == key && pair.Key != jutsuId)
+                        taken.Add(pair.Key);
+                }
+
+                foreach (var owner in taken)
+                    NinjaMudraKey.Remove(owner);
+            }
+
+            if (key == 0)
+                NinjaMudraKey.Remove(jutsuId);
+            else
+                NinjaMudraKey[jutsuId] = key;
+            Save();
         }
 
         public bool IsDotEnabled(string skillId)

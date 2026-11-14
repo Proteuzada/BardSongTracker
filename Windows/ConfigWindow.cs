@@ -1,7 +1,12 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.JobGauge.Enums;
+using Dalamud.Game.ClientState.Keys;
+using Dalamud.Interface.Textures;
+using Dalamud.Plugin.Services;
+using BardSongTracker.Ninja;
 using BardSongTracker.Parse;
+using ActionRow = Lumina.Excel.Sheets.Action;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -22,6 +27,10 @@ namespace BardSongTracker.Windows
         private readonly Func<string>? rankingStatus;
         private readonly Func<int>? clientState;
         private readonly Func<string>? clientLine;
+        private readonly ITextureProvider? textures;
+        private readonly IDataManager? data;
+        private readonly MudraCaster? mudra;
+        private string? capturingMudra;
 
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
@@ -42,7 +51,10 @@ namespace BardSongTracker.Windows
             Action? onParseSettingsChanged = null,
             Func<string>? rankingStatus = null,
             Func<int>? clientState = null,
-            Func<string>? clientLine = null) : base("Bard Song Tracker")
+            Func<string>? clientLine = null,
+            ITextureProvider? textures = null,
+            IDataManager? data = null,
+            MudraCaster? mudra = null) : base("Bard Song Tracker")
         {
             this.Size = new Vector2(920, 760);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -61,6 +73,16 @@ namespace BardSongTracker.Windows
             this.rankingStatus = rankingStatus;
             this.clientState = clientState;
             this.clientLine = clientLine;
+            this.textures = textures;
+            this.data = data;
+            this.mudra = mudra;
+        }
+
+        public bool IsCapturingMudraKey => capturingMudra != null;
+
+        public void ReleaseMudraCapture()
+        {
+            capturingMudra = null;
         }
 
         public void Dispose() { }
@@ -105,6 +127,13 @@ namespace BardSongTracker.Windows
             {
                 ImGui.Spacing();
                 DrawDots();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Ninja"))
+            {
+                ImGui.Spacing();
+                DrawNinja();
                 ImGui.EndTabItem();
             }
 
@@ -744,6 +773,96 @@ namespace BardSongTracker.Windows
                 ImGui.TextColored(new Vector4(1f, 0.78f, 0.45f, 1f), $"Using {resolved}. No Network logs there yet.");
             else
                 ImGui.TextDisabled($"Using {resolved}. {count} network log{(count == 1 ? "" : "s")}.");
+        }
+
+        private void DrawNinja()
+        {
+            Checkbox("Enable ninjutsu keys", configuration.NinjaMudraKeys, value => configuration.NinjaMudraKeys = value);
+            ImGui.TextWrapped("Press a key to perform that ninjutsu. The mudras are sent in the official order, and Ninjutsu follows only after each one is accepted. This runs only while you are a Ninja, and it stays quiet while you are typing. It will not start if a mudra or Ten Chi Jin is already active. Goka Mekkyaku and Hyosho Ranryu press Kassatsu first when that buff is down.");
+            if (!string.IsNullOrEmpty(mudra?.ActiveName))
+                ImGui.TextDisabled("Casting " + mudra.ActiveName + ".");
+            ImGui.Spacing();
+
+            if (ImGui.BeginChild("bst-ninja-list", new Vector2(0f, 0f), false))
+            {
+                foreach (var jutsu in MudraTable.All)
+                    DrawJutsu(jutsu);
+            }
+
+            ImGui.EndChild();
+        }
+
+        private void DrawJutsu(MudraTable.Jutsu jutsu)
+        {
+            ImGui.PushID(jutsu.Id);
+            var icon = JutsuIcon(jutsu.ActionId);
+            if (icon != 0 && textures != null)
+            {
+                var handle = textures.GetFromGameIcon(icon).GetWrapOrEmpty().Handle;
+                ImGui.Image(handle, new Vector2(36f, 36f));
+                ImGui.SameLine();
+            }
+
+            ImGui.BeginGroup();
+            ImGui.Text(jutsu.Name);
+            ImGui.TextDisabled(MudraTable.Steps(jutsu));
+            ImGui.EndGroup();
+            ImGui.SameLine();
+
+            var capturing = capturingMudra == jutsu.Id;
+            var label = capturing ? "Press a key" : KeyLabel(configuration.MudraKey(jutsu.Id));
+            if (ImGui.Button(label, new Vector2(140f, 32f)))
+                capturingMudra = capturing ? null : jutsu.Id;
+
+            if (capturing && mudra != null)
+            {
+                var pressed = mudra.CaptureKey();
+                if (pressed == (int)VirtualKey.ESCAPE)
+                    capturingMudra = null;
+                else if (pressed != 0)
+                {
+                    configuration.SetMudraKey(jutsu.Id, pressed);
+                    capturingMudra = null;
+                }
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Clear") && configuration.MudraKey(jutsu.Id) != 0)
+                configuration.SetMudraKey(jutsu.Id, 0);
+
+            ImGui.Spacing();
+            ImGui.PopID();
+        }
+
+        private uint JutsuIcon(uint actionId)
+        {
+            if (data == null)
+                return 0;
+
+            try
+            {
+                var sheet = data.GetExcelSheet<ActionRow>();
+                if (sheet.TryGetRow(actionId, out var row) && row.Icon != 0)
+                    return row.Icon;
+            }
+            catch (Exception)
+            {
+            }
+
+            return 0;
+        }
+
+        private static string KeyLabel(int code)
+        {
+            if (code == 0 || !Enum.IsDefined(typeof(VirtualKey), code))
+                return "Set key";
+
+            var name = ((VirtualKey)code).ToString();
+            if (name.StartsWith("KEY_", StringComparison.Ordinal))
+                return name[4..];
+            if (name.StartsWith("NUMPAD", StringComparison.Ordinal))
+                return "Num " + name[6..];
+            return name;
         }
 
         private void SaveLogFolder(string path)

@@ -5,6 +5,7 @@ using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Interface.Windowing;
+using BardSongTracker.Ninja;
 using BardSongTracker.Parse;
 using BardSongTracker.Windows;
 using System;
@@ -25,6 +26,8 @@ namespace BardSongTracker
         public IPluginLog PluginLog { get; init; }
         public ITargetManager TargetManager { get; init; }
         public ITextureProvider TextureProvider { get; init; }
+        public IDataManager DataManager { get; init; }
+        public IKeyState KeyState { get; init; }
 
         public Configuration Configuration { get; init; }
         public WindowSystem WindowSystem { get; init; } = new("BardSongTracker");
@@ -38,6 +41,7 @@ namespace BardSongTracker
         private SongTracker SongTracker { get; init; }
         private DotTracker DotTracker { get; init; }
         private SoundAlert SoundAlert { get; init; }
+        private MudraCaster Mudra { get; init; }
 
         public Plugin(
             IDalamudPluginInterface pluginInterface,
@@ -48,7 +52,9 @@ namespace BardSongTracker
             ICommandManager commandManager,
             IPluginLog pluginLog,
             ITargetManager targetManager,
-            ITextureProvider textureProvider)
+            ITextureProvider textureProvider,
+            IDataManager dataManager,
+            IKeyState keyState)
         {
             PluginInterface = pluginInterface;
             ClientState = clientState;
@@ -59,6 +65,8 @@ namespace BardSongTracker
             PluginLog = pluginLog;
             TargetManager = targetManager;
             TextureProvider = textureProvider;
+            DataManager = dataManager;
+            KeyState = keyState;
 
             Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
             Configuration.Initialize(PluginInterface);
@@ -68,6 +76,10 @@ namespace BardSongTracker
             SoundAlert = new SoundAlert();
             SoundAlert.SetVolume(Configuration.SoundVolume);
             SoundAlert.SetSound(Configuration.AlertSoundId);
+            Mudra = new MudraCaster(KeyState);
+            var mudraCheck = MudraTable.SelfCheck();
+            if (mudraCheck != null)
+                PluginLog.Error("Ninja mudra table failed self-check: " + mudraCheck);
 
             ActLog = new ActLogFollower();
             ActLog.Configure(Configuration.ShowParseOverlay, Configuration.PullIdleSeconds, Configuration.ActLogDirectory);
@@ -83,7 +95,10 @@ namespace BardSongTracker
                 ApplyParseSettings,
                 () => Rankings.Status,
                 () => Rankings.ClientState,
-                () => Rankings.ClientLine);
+                () => Rankings.ClientLine,
+                TextureProvider,
+                DataManager,
+                Mudra);
             OverlayWindow = new OverlayWindow(Configuration, SongTracker, DotTracker);
             ParseOverlay = new ParseOverlayWindow(Configuration, ActLog, TextureProvider, () => Rankings.ClientState, () => Rankings.MeterLink);
 
@@ -93,7 +108,7 @@ namespace BardSongTracker
 
             CommandManager.AddHandler("/bst", new CommandInfo(OnCommand)
             {
-                HelpMessage = "Open the BardSongTracker menu (songs, DoTs, and parse)."
+                HelpMessage = "Open the BardSongTracker menu (songs, DoTs, parse, and ninja mudras)."
             });
 
             PluginInterface.UiBuilder.Draw += DrawUI;
@@ -126,7 +141,11 @@ namespace BardSongTracker
             try
             {
                 RefreshRankings();
+                if (!ConfigWindow.IsOpen)
+                    ConfigWindow.ReleaseMudraCapture();
+                Mudra.HotkeysSuspended = ConfigWindow.IsCapturingMudraKey;
                 var localPlayer = ObjectTable.LocalPlayer;
+                Mudra.Tick(localPlayer, Configuration);
                 if (localPlayer == null)
                 {
                     SongTracker.Update(null);

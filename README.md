@@ -9,6 +9,7 @@ The menu has five tabs:
 - **Logs** — ACT or IINACT network log folder, and the FF Logs API client used for the parse curve
 - **Bard** — thresholds for Mage's Ballad, Army's Paeon, and The Wanderer's Minuet
 - **DoTs** — role and job filters, search, and a toggle for each skill
+- **Ninja** — one key per ninjutsu. The key sends that jutsu's mudras in the official order, then Ninjutsu
 
 In combat, only your current job is tracked. Enemy effects are read from your current target. Doton, Salted Earth, and Slipstream use the ground-effect timer on you.
 
@@ -21,6 +22,12 @@ Jobs without a tracked effect (Warrior, Viper, Dancer, and Red Mage) stay in the
 ## Live parse
 
 The damage meter tails the newest `Network_*.log`. An empty Logs tab uses the usual Advanced Combat Tracker or IINACT folder. Choose another folder there when the logs are stored somewhere else. The Meter tab shows or hides the overlay. Only rDPS and parse leaves each row as rDPS, the job icon, the first name, and the parse. The other checkboxes add damage percent, a death count after someone dies, the fight time and zone above the columns, and a click on a row for crit rate, direct hit rate, and the biggest hit. Keep the last pull leaves those numbers up after a wipe until the next pull. rDPS is shown in thousands, such as 12k or 40k, unless the Meter tab is set to full numbers. Eight players fit. rDPS is raid-contributing damage per second: damage gained from other players' raid buffs is removed, and the damage those buffs gave to other players is added, using the split FF Logs publishes. The parse is that rDPS placed on the site's ranking curve for the same fight and job. Ultimates are split internally into the parts FF Logs ranks, but the meter keeps one running total for damage, rDPS, and the fight clock. The percent is the FF Logs estimate: current rDPS placed by linear interpolation on the cached ladder for that job. It updates with the pull. Dancing Mad, Futures Rewritten, Dragonsong's Reprise, and The Omega Protocol use the ladder of the part in progress. The Unending Coil of Bahamut, The Weapon's Refrain, and The Epic of Alexander have one ladder, so the running total is scored on that fight. Damage and rDPS keep summing across parts. A savage floor or a dungeon stays one fight until the zone changes or combat drops. The Logs tab and the bottom of the meter say whether the API client is connected. The number shows as soon as that job's ranking curve starts loading, then moves with rDPS for the rest of the pull. The bottom of the meter says when the curve is still loading or when FF Logs has no encounter for the fight. Time spent dead lowers rDPS because the fight clock keeps running. Pet damage is added to the owner. The meter clears on a wipe, and when a monster drops aggro without dying, including a striking dummy reset from the right-click menu, unless the last pull is kept. A kill keeps the numbers and stops the clock. Drag any corner of the meter to resize it. Meter scale changes the size of the rows, names, and numbers. Show only me leaves your row and hides the rest. Your parse is still your own rDPS on that boss's curve. Overlay scale on the General tab changes the song and DoT overlay only.
+
+## Ninja mudras
+
+The Ninja tab binds a key to each ninjutsu. Pressing it performs the mudras in the order published in the job guide, then presses Ninjutsu. Raiton is Ten, then Chi. Katon is Chi, then Ten. Hyoton is Ten, then Jin. The three-mudra jutsu follow the same guide: Huton ends on Ten, Doton ends on Chi, and Suiton ends on Jin. Goka Mekkyaku and Hyosho Ranryu use the Katon and Hyoton orders and press Kassatsu first when that buff is not already up.
+
+The sequence runs only while the current job is Ninja. It does not start while chat or another text box is open, while a mudra is already held, or during Ten Chi Jin. If a mudra is not accepted, the rest of the sequence stops, so Ninjutsu is not fired on the wrong combination. Damage, the clock, and the parse are unchanged.
 
 ## Install from Dalamud, without compiling
 
