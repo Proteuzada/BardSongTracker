@@ -854,10 +854,10 @@ namespace BardSongTracker.Windows
 
         private static string KeyLabel(int code)
         {
-            if (code == 0 || !Enum.IsDefined(typeof(VirtualKey), code))
+            if (code <= 0 || code > ushort.MaxValue || !Enum.IsDefined(typeof(VirtualKey), (ushort)code))
                 return "Set key";
 
-            var name = ((VirtualKey)code).ToString();
+            var name = ((VirtualKey)(ushort)code).ToString();
             if (name.StartsWith("KEY_", StringComparison.Ordinal))
                 return name[4..];
             if (name.StartsWith("NUMPAD", StringComparison.Ordinal))
