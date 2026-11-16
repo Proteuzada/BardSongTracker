@@ -53,6 +53,11 @@ namespace BardSongTracker
         public Dictionary<string, int> NinjaMudraKey { get; set; } = new();
 
         /// <summary>
+        /// Hotbar slot chosen for each ninjutsu icon. Bars are 1–10 and slots are 1–12.
+        /// </summary>
+        public Dictionary<string, MudraHotbarSlot> NinjaMudraSlot { get; set; } = new();
+
+        /// <summary>
         /// Skill ids the player turned off. Missing ids stay enabled, so new skills
         /// show up without wiping an old config.
         /// </summary>
@@ -101,6 +106,65 @@ namespace BardSongTracker
             Save();
         }
 
+        public MudraHotbarSlot MudraSlot(string jutsuId)
+        {
+            NinjaMudraSlot ??= new Dictionary<string, MudraHotbarSlot>();
+            if (NinjaMudraSlot.TryGetValue(jutsuId, out var saved) && saved != null)
+            {
+                saved.Hotbar = Math.Clamp(saved.Hotbar, 1, 10);
+                saved.Slot = Math.Clamp(saved.Slot, 1, 12);
+                return saved;
+            }
+
+            var index = 0;
+            foreach (var jutsu in Ninja.MudraTable.All)
+            {
+                if (jutsu.Id == jutsuId)
+                    break;
+                index++;
+            }
+
+            var created = new MudraHotbarSlot
+            {
+                Hotbar = 1,
+                Slot = Math.Clamp(index + 1, 1, 12),
+            };
+            NinjaMudraSlot[jutsuId] = created;
+            return created;
+        }
+
+        public void SetMudraSlotChoice(string jutsuId, int hotbar, int slot)
+        {
+            var entry = MudraSlot(jutsuId);
+            hotbar = Math.Clamp(hotbar, 1, 10);
+            slot = Math.Clamp(slot, 1, 12);
+            if (entry.Hotbar == hotbar && entry.Slot == slot)
+                return;
+
+            entry.Hotbar = hotbar;
+            entry.Slot = slot;
+            entry.Placed = false;
+            Save();
+        }
+
+        public void MarkMudraPlaced(string jutsuId)
+        {
+            var entry = MudraSlot(jutsuId);
+            entry.Placed = true;
+            if (NinjaMudraSlot != null)
+            {
+                foreach (var pair in NinjaMudraSlot)
+                {
+                    if (pair.Key == jutsuId || pair.Value == null)
+                        continue;
+                    if (pair.Value.Hotbar == entry.Hotbar && pair.Value.Slot == entry.Slot)
+                        pair.Value.Placed = false;
+                }
+            }
+
+            Save();
+        }
+
         public bool IsDotEnabled(string skillId)
         {
             return DisabledDotIds == null || !DisabledDotIds.Contains(skillId);
@@ -138,5 +202,12 @@ namespace BardSongTracker
 
             return enabled;
         }
+    }
+
+    public sealed class MudraHotbarSlot
+    {
+        public int Hotbar { get; set; } = 1;
+        public int Slot { get; set; } = 1;
+        public bool Placed { get; set; }
     }
 }

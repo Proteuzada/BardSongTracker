@@ -32,6 +32,26 @@ namespace BardSongTracker.Ninja
             new("hyosho", "Hyosho Ranryu", 16492, true, Ten, Jin),
         };
 
+        public static bool TryGet(uint actionId, out Jutsu jutsu)
+        {
+            foreach (var candidate in All)
+            {
+                if (candidate.ActionId != actionId)
+                    continue;
+
+                jutsu = candidate;
+                return true;
+            }
+
+            jutsu = default;
+            return false;
+        }
+
+        public static bool IsJutsu(uint actionId)
+        {
+            return TryGet(actionId, out _);
+        }
+
         public static string? SelfCheck()
         {
             if (All.Length != 9)
