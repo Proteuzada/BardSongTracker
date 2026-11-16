@@ -55,7 +55,8 @@ namespace BardSongTracker
             ITextureProvider textureProvider,
             IDataManager dataManager,
             IKeyState keyState,
-            IGameInteropProvider gameInterop)
+            IGameInteropProvider gameInterop,
+            IGameGui gameGui)
         {
             PluginInterface = pluginInterface;
             ClientState = clientState;
@@ -77,7 +78,7 @@ namespace BardSongTracker
             SoundAlert = new SoundAlert();
             SoundAlert.SetVolume(Configuration.SoundVolume);
             SoundAlert.SetSound(Configuration.AlertSoundId);
-            Mudra = new MudraCaster(KeyState, ObjectTable, gameInterop, PluginLog, Configuration);
+            Mudra = new MudraCaster(KeyState, ObjectTable, gameGui, gameInterop, PluginLog, Configuration);
             var mudraCheck = MudraTable.SelfCheck();
             if (mudraCheck != null)
                 PluginLog.Error("Ninja mudra table failed self-check: " + mudraCheck);

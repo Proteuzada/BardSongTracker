@@ -3,9 +3,12 @@ using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 
 namespace BardSongTracker.Ninja
 {
@@ -19,8 +22,23 @@ namespace BardSongTracker.Ninja
         private const int StepBudgetMs = 1200;
         private const int MinimumGapMs = 420;
 
+        private static readonly string[] HotbarAddons =
+        {
+            "_ActionBar",
+            "_ActionBar01",
+            "_ActionBar02",
+            "_ActionBar03",
+            "_ActionBar04",
+            "_ActionBar05",
+            "_ActionBar06",
+            "_ActionBar07",
+            "_ActionBar08",
+            "_ActionBar09",
+        };
+
         private readonly IKeyState keys;
         private readonly IObjectTable objects;
+        private readonly IGameGui gui;
         private readonly IPluginLog log;
         private readonly Configuration configuration;
         private readonly HashSet<int> held = new();
@@ -34,10 +52,11 @@ namespace BardSongTracker.Ninja
         private long deadline;
         private long nextGap;
 
-        public MudraCaster(IKeyState keys, IObjectTable objects, IGameInteropProvider interop, IPluginLog log, Configuration configuration)
+        public MudraCaster(IKeyState keys, IObjectTable objects, IGameGui gui, IGameInteropProvider interop, IPluginLog log, Configuration configuration)
         {
             this.keys = keys;
             this.objects = objects;
+            this.gui = gui;
             this.log = log;
             this.configuration = configuration;
             executeSlot = Arm<ExecuteSlotDelegate>(interop, RaptureHotbarModule.Addresses.ExecuteSlot.Value, ExecuteSlotDetour);
@@ -99,10 +118,26 @@ namespace BardSongTracker.Ninja
             return HotkeysSuspended ? Pressed() : 0;
         }
 
-        public unsafe string? Place(int hotbar, int slot, uint actionId)
+        public unsafe string? Drop(uint actionId, float x, float y, out int hotbar, out int slot)
         {
-            if (hotbar is < 1 or > 10 || slot is < 1 or > 12)
-                return "Use hotbar 1–10 and slot 1–12.";
+            hotbar = 0;
+            slot = 0;
+            if (!SlotAt(x, y, out var hotbarId, out var slotId))
+                return "Drop the icon on a hotbar slot.";
+
+            var error = WriteSlot(hotbarId, slotId, actionId);
+            if (error != null)
+                return error;
+
+            hotbar = (int)hotbarId + 1;
+            slot = (int)slotId + 1;
+            return null;
+        }
+
+        private unsafe string? WriteSlot(uint hotbarId, uint slotId, uint actionId)
+        {
+            if (hotbarId > 9 || slotId > 11)
+                return "Drop the icon on a main hotbar slot.";
 
             var module = RaptureHotbarModule.Instance();
             if (module == null || !module->ModuleReady)
@@ -110,8 +145,8 @@ namespace BardSongTracker.Ninja
             if ((module->ActiveHotbarClassJobId & 0x7F) != NinjaJob)
                 return "Switch to Ninja first. The icon is saved on the job you are playing.";
 
-            module->SetAndSaveSlot((uint)(hotbar - 1), (uint)(slot - 1), RaptureHotbarModule.HotbarSlotType.Action, actionId, false, false);
-            var written = module->GetSlotById((uint)(hotbar - 1), (uint)(slot - 1));
+            module->SetAndSaveSlot(hotbarId, slotId, RaptureHotbarModule.HotbarSlotType.Action, actionId, false, false);
+            var written = module->GetSlotById(hotbarId, slotId);
             if (written == null
                 || written->CommandType != RaptureHotbarModule.HotbarSlotType.Action
                 || written->CommandId != actionId)
@@ -119,6 +154,84 @@ namespace BardSongTracker.Ninja
 
             written->LoadIconId();
             return null;
+        }
+
+        private unsafe bool SlotAt(float x, float y, out uint hotbarId, out uint slotId)
+        {
+            hotbarId = 0;
+            slotId = 0;
+            foreach (var name in HotbarAddons)
+            {
+                var bar = gui.GetAddonByName<AddonActionBarBase>(name, 1);
+                if (bar == null || !bar->IsVisible || bar->SlotCount <= 0)
+                    continue;
+
+                var hotbar = bar->RaptureHotbarId;
+                if (hotbar > 9)
+                    continue;
+
+                var count = Math.Min(bar->SlotCount, bar->ActionBarSlotVector.LongCount);
+                var slots = bar->ActionBarSlotVector.First;
+                if (slots == null)
+                    continue;
+
+                for (long i = 0; i < count && i < 12; i++)
+                {
+                    if (!Covers(slots[i].ComponentDragDrop, x, y))
+                        continue;
+
+                    hotbarId = hotbar;
+                    slotId = (uint)i;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static unsafe bool Covers(AtkComponentDragDrop* component, float x, float y)
+        {
+            if (component == null || component->OwnerNode == null)
+                return false;
+
+            var node = (AtkResNode*)component->OwnerNode;
+            if (!node->IsVisible() || node->Width == 0 || node->Height == 0)
+                return false;
+
+            var scale = NodeScale(node);
+            var size = new Vector2(node->Width * scale.X, node->Height * scale.Y);
+            var pos = new Vector2(node->ScreenX, node->ScreenY);
+            if (pos == Vector2.Zero)
+                pos = NodePosition(node);
+
+            return x >= pos.X && y >= pos.Y && x <= pos.X + size.X && y <= pos.Y + size.Y;
+        }
+
+        private static unsafe Vector2 NodePosition(AtkResNode* node)
+        {
+            var pos = new Vector2(node->X, node->Y);
+            var parent = node->ParentNode;
+            while (parent != null)
+            {
+                pos *= new Vector2(parent->ScaleX, parent->ScaleY);
+                pos += new Vector2(parent->X, parent->Y);
+                parent = parent->ParentNode;
+            }
+
+            return pos;
+        }
+
+        private static unsafe Vector2 NodeScale(AtkResNode* node)
+        {
+            var scale = new Vector2(node->ScaleX, node->ScaleY);
+            var parent = node->ParentNode;
+            while (parent != null)
+            {
+                scale *= new Vector2(parent->ScaleX, parent->ScaleY);
+                parent = parent->ParentNode;
+            }
+
+            return scale;
         }
 
         private unsafe void Advance()

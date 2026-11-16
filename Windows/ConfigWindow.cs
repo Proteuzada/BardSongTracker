@@ -32,6 +32,10 @@ namespace BardSongTracker.Windows
         private readonly MudraCaster? mudra;
         private string? capturingMudra;
         private string ninjaPlaceNote = "";
+        private uint draggingAction;
+        private uint draggingIcon;
+        private string draggingName = "";
+        private bool dragMoved;
 
         private CombatRole? roleFilter;
         private uint selectedJobId = 24;
@@ -94,7 +98,10 @@ namespace BardSongTracker.Windows
             ImGui.Spacing();
 
             if (!ImGui.BeginTabBar("bst-tabs"))
+            {
+                FinishIconDrag();
                 return;
+            }
 
             if (ImGui.BeginTabItem("General"))
             {
@@ -139,6 +146,7 @@ namespace BardSongTracker.Windows
             }
 
             ImGui.EndTabBar();
+            FinishIconDrag();
         }
 
         private void DrawHeader()
@@ -779,26 +787,20 @@ namespace BardSongTracker.Windows
         private void DrawNinja()
         {
             Checkbox("Enable ninjutsu keys and hotbar icons", configuration.NinjaMudraKeys, value => configuration.NinjaMudraKeys = value);
-            ImGui.TextWrapped("Press a key, or the icon on your hotbar, to perform that ninjutsu. Place icon writes the real skill icon onto that slot while you are a Ninja, and pressing it sends the mudras in the official order. Ninjutsu follows only after each mudra is accepted. This stays quiet while you are typing, and it will not start if a mudra or Ten Chi Jin is already active. Goka Mekkyaku and Hyosho Ranryu press Kassatsu first when that buff is down.");
+            ImGui.TextWrapped("Drag a skill icon onto a hotbar slot, or press its key. Either one sends the mudras in the official order, and Ninjutsu follows only after each mudra is accepted. This runs only while you are a Ninja. It stays quiet while you are typing, and it will not start if a mudra or Ten Chi Jin is already active. Goka Mekkyaku and Hyosho Ranryu press Kassatsu first when that buff is down.");
             if (!string.IsNullOrEmpty(mudra?.ActiveName))
                 ImGui.TextDisabled("Casting " + mudra.ActiveName + ".");
-            if (ImGui.Button("Place all icons"))
-                PlaceAll();
             if (ninjaPlaceNote.Length > 0)
-            {
-                ImGui.SameLine();
                 ImGui.TextDisabled(ninjaPlaceNote);
-            }
 
             ImGui.Spacing();
 
             if (ImGui.BeginChild("bst-ninja-list", new Vector2(0f, 0f), false))
             {
-                if (ImGui.BeginTable("bst-ninja-rows", 3, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX))
+                if (ImGui.BeginTable("bst-ninja-rows", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX))
                 {
                     ImGui.TableSetupColumn("icon", ImGuiTableColumnFlags.WidthFixed, 44f);
                     ImGui.TableSetupColumn("jutsu", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("slot", ImGuiTableColumnFlags.WidthFixed, 250f);
                     foreach (var jutsu in MudraTable.All)
                         DrawJutsu(jutsu);
                     ImGui.EndTable();
@@ -808,40 +810,29 @@ namespace BardSongTracker.Windows
             ImGui.EndChild();
         }
 
-        private void PlaceAll()
-        {
-            if (mudra == null)
-            {
-                ninjaPlaceNote = "Hotbar is not ready yet.";
-                return;
-            }
-
-            foreach (var jutsu in MudraTable.All)
-            {
-                var choice = configuration.MudraSlot(jutsu.Id);
-                var error = mudra.Place(choice.Hotbar, choice.Slot, jutsu.ActionId);
-                if (error != null)
-                {
-                    ninjaPlaceNote = error;
-                    return;
-                }
-
-                configuration.MarkMudraPlaced(jutsu.Id);
-            }
-
-            ninjaPlaceNote = "Icons placed on the Ninja hotbar.";
-        }
-
         private void DrawJutsu(MudraTable.Jutsu jutsu)
         {
             ImGui.PushID(jutsu.Id);
             ImGui.TableNextRow(ImGuiTableRowFlags.None, 42f);
             ImGui.TableNextColumn();
             var icon = JutsuIcon(jutsu.ActionId);
+            var iconPos = ImGui.GetCursorScreenPos();
             if (icon != 0 && textures != null)
             {
                 var handle = textures.GetFromGameIcon(icon).GetWrapOrEmpty().Handle;
                 ImGui.Image(handle, new Vector2(36f, 36f));
+                ImGui.SetCursorScreenPos(iconPos);
+            }
+
+            ImGui.InvisibleButton("drag", new Vector2(36f, 36f));
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Drag onto a hotbar slot");
+            if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            {
+                draggingAction = jutsu.ActionId;
+                draggingIcon = icon;
+                draggingName = jutsu.Name;
+                dragMoved = true;
             }
 
             ImGui.TableNextColumn();
@@ -869,42 +860,45 @@ namespace BardSongTracker.Windows
             }
 
             ImGui.TextDisabled(MudraTable.Steps(jutsu));
-
-            ImGui.TableNextColumn();
-            var choice = configuration.MudraSlot(jutsu.Id);
-            var hotbar = choice.Hotbar;
-            var slot = choice.Slot;
-            ImGui.SetNextItemWidth(72f);
-            if (ImGui.InputInt("Bar", ref hotbar))
-            {
-                hotbar = Math.Clamp(hotbar, 1, 10);
-                configuration.SetMudraSlotChoice(jutsu.Id, hotbar, slot);
-            }
-
-            ImGui.SetNextItemWidth(72f);
-            if (ImGui.InputInt("Slot", ref slot))
-            {
-                slot = Math.Clamp(slot, 1, 12);
-                configuration.SetMudraSlotChoice(jutsu.Id, hotbar, slot);
-            }
-
-            hotbar = Math.Clamp(hotbar, 1, 10);
-            slot = Math.Clamp(slot, 1, 12);
-            if (ImGui.Button("Place icon") && mudra != null)
-            {
-                var error = mudra.Place(hotbar, slot, jutsu.ActionId);
-                ninjaPlaceNote = error ?? jutsu.Name + " is on hotbar " + hotbar + ", slot " + slot + ".";
-                if (error == null)
-                    configuration.MarkMudraPlaced(jutsu.Id);
-            }
-
-            if (choice.Placed)
-            {
-                ImGui.SameLine();
-                ImGui.TextDisabled("On " + choice.Hotbar + "·" + choice.Slot);
-            }
-
             ImGui.PopID();
+        }
+
+        private void FinishIconDrag()
+        {
+            if (!dragMoved || draggingAction == 0)
+                return;
+
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                if (draggingIcon != 0 && textures != null)
+                {
+                    var handle = textures.GetFromGameIcon(draggingIcon).GetWrapOrEmpty().Handle;
+                    var pos = ImGui.GetMousePos() - new Vector2(18f, 18f);
+                    ImGui.GetForegroundDrawList().AddImage(handle, pos, pos + new Vector2(36f, 36f));
+                }
+
+                return;
+            }
+
+            if (!ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            {
+                dragMoved = false;
+                draggingAction = 0;
+                draggingIcon = 0;
+                return;
+            }
+
+            var droppedAt = ImGui.GetMousePos();
+            if (mudra == null)
+                ninjaPlaceNote = "Hotbar is not ready yet.";
+            else if (mudra.Drop(draggingAction, droppedAt.X, droppedAt.Y, out var hotbar, out var slot) is { } error)
+                ninjaPlaceNote = error;
+            else
+                ninjaPlaceNote = draggingName + " is on hotbar " + hotbar + ", slot " + slot + ".";
+
+            dragMoved = false;
+            draggingAction = 0;
+            draggingIcon = 0;
         }
 
         private uint JutsuIcon(uint actionId)

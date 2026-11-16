@@ -9,7 +9,7 @@ The menu has five tabs:
 - **Logs** — ACT or IINACT network log folder, and the FF Logs API client used for the parse curve
 - **Bard** — thresholds for Mage's Ballad, Army's Paeon, and The Wanderer's Minuet
 - **DoTs** — role and job filters, search, and a toggle for each skill
-- **Ninja** — one key per ninjutsu, and a button that puts that skill's icon on a hotbar slot. The key or the icon sends the mudras in the official order, then Ninjutsu
+- **Ninja** — one key per ninjutsu. Drag the skill icon from this tab onto a hotbar slot. The key or the icon sends the mudras in the official order, then Ninjutsu
 
 In combat, only your current job is tracked. Enemy effects are read from your current target. Doton, Salted Earth, and Slipstream use the ground-effect timer on you.
 
@@ -27,7 +27,7 @@ The damage meter tails the newest `Network_*.log`. An empty Logs tab uses the us
 
 The Ninja tab binds a key to each ninjutsu. Pressing it performs the mudras in the order published in the job guide, then presses Ninjutsu. Raiton is Ten, then Chi. Katon is Chi, then Ten. Hyoton is Ten, then Jin. The three-mudra jutsu follow the same guide: Huton ends on Ten, Doton ends on Chi, and Suiton ends on Jin. Goka Mekkyaku and Hyosho Ranryu use the Katon and Hyoton orders and press Kassatsu first when that buff is not already up.
 
-Place icon writes that skill's own icon onto a hotbar slot while you are a Ninja. Hotbars are 1–10 and slots are 1–12. Place all icons uses the slot shown on each row, starting at hotbar 1, slots 1 through 9. Pressing the icon runs the same mudra order as the key. The icon stays lit on Ninja instead of sitting greyed out.
+Drag the skill icon from the Ninja tab onto a hotbar slot while you are a Ninja. The icon that lands is that skill's own icon, and it stays lit. Pressing it runs the same mudra order as the key.
 
 The sequence runs only while the current job is Ninja. It does not start while chat or another text box is open, while a mudra is already held, or during Ten Chi Jin. If a mudra is not accepted, the rest of the sequence stops, so Ninjutsu is not fired on the wrong combination. Damage, the clock, and the parse are unchanged.
 
